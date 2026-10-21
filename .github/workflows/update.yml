@@ -1,0 +1,78 @@
+name: 更新指数
+
+# 美东交易时间每 5 分钟触发一次。cron 用 UTC，13–21 点覆盖夏令时和冬令时的整个交易时段；
+# 是否真正更新由 ci.py 按纽交所日历判断（盘前、休市、收盘版已完成时直接跳过）。
+on:
+  schedule:
+    - cron: "*/5 13-21 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 不管是否开盘都更新一次
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      deploy: ${{ steps.run.outputs.deploy }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - id: day
+        run: echo "date=$(TZ=America/New_York date +%F)" >> "$GITHUB_OUTPUT"
+
+      # 历史行情每天全量下载一次，当天后续运行复用
+      - uses: actions/cache@v4
+        with:
+          path: cache
+          key: prices-${{ steps.day.outputs.date }}
+          restore-keys: prices-
+
+      - id: run
+        env:
+          FORCE: ${{ github.event_name == 'workflow_dispatch' && inputs.force }}
+        run: python ci.py
+
+      - name: 提交收盘数据
+        if: steps.run.outputs.commit == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/
+          git diff --cached --quiet || git commit -m "收盘数据 ${{ steps.day.outputs.date }}"
+          git pull --rebase && git push
+
+      - if: steps.run.outputs.deploy == 'true'
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  deploy:
+    needs: update
+    if: needs.update.outputs.deploy == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

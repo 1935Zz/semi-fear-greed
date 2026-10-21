@@ -1,0 +1,645 @@
+<title>半导体恐慌贪婪指数</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+<style>
+/* Layout: 仪表盘。顶部读数（仪表 + 对比），中部走势，下部 8 个分项卡片，底部方法与参考数据。
+   颜色只留给情绪：恐慌为暖红，贪婪为蓝，中性为灰；界面本身保持冷灰的硅片色调。 */
+:root {
+  --bg: #eef1f2;
+  --surface: #ffffff;
+  --ink: #111a1f;
+  --ink-2: #4c5a63;
+  --ink-3: #7b8891;
+  --line: #d6dde0;
+  --grid: #e7ecee;
+  --ef: #c8362f;   /* 极度恐慌 */
+  --f: #e07a4f;    /* 恐慌 */
+  --n: #9aa3a8;    /* 中性 */
+  --g: #5598e7;    /* 贪婪 */
+  --eg: #1c5cab;   /* 极度贪婪 */
+  --cnn: #6250d6;
+  --font-display: "Barlow Condensed", "Arial Narrow", "Noto Sans SC", sans-serif;
+  --font-body: "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1315; --surface: #161d20; --ink: #e8eef0; --ink-2: #a9b6bc; --ink-3: #76848b;
+    --line: #2a3539; --grid: #1f282c;
+    --ef: #e66767; --f: #e8875a; --n: #6f7a80; --g: #6da7ec; --eg: #3987e5; --cnn: #9085e9;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1315; --surface: #161d20; --ink: #e8eef0; --ink-2: #a9b6bc; --ink-3: #76848b;
+  --line: #2a3539; --grid: #1f282c;
+  --ef: #e66767; --f: #e8875a; --n: #6f7a80; --g: #6da7ec; --eg: #3987e5; --cnn: #9085e9;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--font-body);
+  font-size: 15px; line-height: 1.6;
+}
+.page {
+  max-width: 1180px; margin: 0 auto;
+  padding-block: 28px 56px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 28px;
+}
+h1, h2, h3 { margin: 0; text-wrap: balance; }
+p { margin: 0; }
+.num { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+.eyebrow { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-family: var(--font-data); }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 20px; min-width: 0; }
+.section-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; }
+.section-head h2 { font-size: 19px; font-weight: 700; }
+.section-head p { color: var(--ink-2); font-size: 13px; }
+
+/* header */
+header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: 12px 24px; }
+header h1 { font-size: clamp(26px, 4vw, 34px); font-weight: 700; letter-spacing: .01em; margin-top: 4px; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--ink-2); font-size: 13px; }
+.meta b { color: var(--ink); font-weight: 500; }
+.live { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); }
+.live::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); }
+.live.on::before { background: var(--g); box-shadow: 0 0 0 3px color-mix(in srgb, var(--g) 25%, transparent); }
+.live.stale::before { background: var(--f); }
+.up { color: var(--g); } .down { color: var(--ef); }
+
+/* rating pill */
+.pill {
+  display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px 2px 8px;
+  border-radius: 999px; font-size: 12.5px; font-weight: 500; white-space: nowrap;
+  color: var(--ink); background: color-mix(in srgb, var(--c) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c) 45%, transparent);
+}
+.pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--c); }
+.r-extreme_fear { --c: var(--ef); } .r-fear { --c: var(--f); } .r-neutral { --c: var(--n); }
+.r-greed { --c: var(--g); } .r-extreme_greed { --c: var(--eg); }
+
+/* hero */
+.hero { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 20px; }
+.gauge-panel { display: grid; justify-items: center; gap: 4px; padding-block: 24px 20px; }
+.gauge { width: 100%; max-width: 420px; height: auto; display: block; }
+.gauge text { fill: var(--ink-3); font-family: var(--font-data); font-size: 11px; }
+.gauge .zone-label { font-family: var(--font-body); font-size: 10.5px; fill: var(--ink-2); }
+.score-big { font-family: var(--font-display); font-weight: 600; font-size: 76px; line-height: 1; letter-spacing: .01em; margin-top: 2px; }
+.score-sub { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
+.score-sub .pill { font-size: 14px; padding: 3px 12px 3px 10px; }
+.gauge-note { color: var(--ink-3); font-size: 12.5px; margin-top: 10px; text-align: center; }
+
+.side { display: grid; gap: 20px; align-content: start; }
+.compare { display: grid; gap: 0; }
+.compare h3, .cnn h3 { font-size: 14px; font-weight: 500; color: var(--ink-2); margin-bottom: 8px; }
+.compare-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 12px; padding-block: 9px; border-top: 1px solid var(--grid); }
+.compare-row:first-of-type { border-top: 0; }
+.compare-row .num { font-size: 17px; font-weight: 500; min-width: 3ch; text-align: right; }
+.compare-row .pill { min-width: 88px; justify-content: center; }
+.cnn-top { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.cnn-top .num { font-family: var(--font-display); font-size: 44px; font-weight: 600; line-height: 1; }
+.cnn-gap { font-size: 13.5px; color: var(--ink-2); margin-top: 10px; }
+.cnn-comps { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px 14px; margin-top: 12px; font-size: 12.5px; color: var(--ink-2); }
+.cnn-comps span.num { color: var(--ink); }
+.cnn-comps div { display: flex; justify-content: space-between; gap: 8px; border-bottom: 1px dotted var(--line); padding-bottom: 3px; }
+
+/* history */
+.history { display: grid; gap: 14px; }
+.controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button {
+  font: inherit; font-size: 13px; padding: 5px 12px; border: 0; background: transparent; color: var(--ink-2);
+  cursor: pointer; border-left: 1px solid var(--line);
+}
+.seg button:first-child { border-left: 0; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
+.seg button:focus-visible, .toggle input:focus-visible { outline: 2px solid var(--g); outline-offset: 2px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { display: inline-block; width: 16px; height: 2px; background: var(--ink); }
+.legend i.cnn { background: var(--cnn); }
+.legend i.band { height: 10px; width: 10px; border-radius: 2px; background: color-mix(in srgb, var(--c) 30%, transparent); }
+.toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-2); cursor: pointer; }
+.chart-wrap { position: relative; }
+.chart-wrap svg { display: block; width: 100%; overflow: visible; }
+.chart-title { font-size: 12.5px; color: var(--ink-2); margin-bottom: 2px; }
+svg .axis text { fill: var(--ink-3); font-family: var(--font-data); font-size: 10.5px; }
+svg .gridline { stroke: var(--grid); stroke-width: 1; }
+.tip {
+  position: absolute; pointer-events: none; z-index: 2; min-width: 168px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 6px 18px rgb(0 0 0 / .12); padding: 8px 10px; font-size: 12.5px; display: grid; gap: 3px;
+}
+.tip .row { display: flex; justify-content: space-between; gap: 14px; color: var(--ink-2); }
+.tip .row b { color: var(--ink); font-weight: 500; font-family: var(--font-data); }
+.tip .d { font-family: var(--font-data); color: var(--ink); font-weight: 500; }
+
+/* components */
+.comps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.comp { display: grid; gap: 10px; align-content: start; padding: 16px; }
+.comp-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.comp-head h3 { font-size: 15.5px; font-weight: 700; }
+.comp-head .cnn-name { font-size: 11px; color: var(--ink-3); font-family: var(--font-data); text-align: right; }
+.comp-score { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.comp-score .v { font-family: var(--font-display); font-size: 38px; font-weight: 600; line-height: 1; }
+.track { position: relative; height: 6px; border-radius: 3px; display: flex; gap: 2px; }
+.track span { height: 100%; border-radius: 2px; background: color-mix(in srgb, var(--c) 55%, transparent); }
+.track .mark { position: absolute; top: -4px; width: 3px; height: 14px; border-radius: 2px; background: var(--ink); box-shadow: 0 0 0 2px var(--surface); transform: translateX(-50%); }
+.raw { font-size: 12.5px; color: var(--ink-2); display: grid; gap: 1px; }
+.raw .num { color: var(--ink); font-size: 15px; font-weight: 500; }
+.spark { width: 100%; height: 44px; display: block; }
+.spark-cap { display: flex; justify-content: space-between; font-size: 11px; color: var(--ink-3); font-family: var(--font-data); margin-top: -6px; }
+.comp .desc { font-size: 12.5px; color: var(--ink-2); line-height: 1.55; }
+
+/* tables */
+.two { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 20px; }
+.tbl-wrap { overflow-x: auto; margin-top: 12px; }
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+th { text-align: right; font-weight: 500; color: var(--ink-3); font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { text-align: right; padding: 8px; border-bottom: 1px solid var(--grid); font-family: var(--font-data); font-variant-numeric: tabular-nums; white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; font-family: var(--font-body); }
+.note { font-size: 12.5px; color: var(--ink-3); margin-top: 10px; line-height: 1.6; }
+
+.method { display: grid; gap: 12px; font-size: 14px; color: var(--ink-2); }
+.method h2 { color: var(--ink); }
+.method ol { margin: 0; padding-left: 1.3em; display: grid; gap: 6px; max-width: 75ch; }
+.method b { color: var(--ink); font-weight: 500; }
+footer { font-size: 12px; color: var(--ink-3); }
+
+.empty { padding: 60px 20px; text-align: center; color: var(--ink-2); }
+
+@media (max-width: 1000px) { .comps { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 860px) { .hero, .two { grid-template-columns: 1fr; } }
+@media (max-width: 520px) {
+  .comps { grid-template-columns: 1fr; }
+  .score-big { font-size: 64px; }
+  .panel { padding: 16px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .needle { transition: transform .9s cubic-bezier(.2,.8,.2,1); }
+}
+</style>
+
+<div class="page" id="app"></div>
+
+<script>
+let DATA = /*__DATA__*/null;
+
+const RATING_CN = { extreme_fear: "极度恐慌", fear: "恐慌", neutral: "中性", greed: "贪婪", extreme_greed: "极度贪婪" };
+const ZONES = [
+  { key: "extreme_fear", from: 0, to: 25 }, { key: "fear", from: 25, to: 45 }, { key: "neutral", from: 45, to: 55 },
+  { key: "greed", from: 55, to: 75 }, { key: "extreme_greed", from: 75, to: 100 },
+];
+const ZONE_VAR = { extreme_fear: "--ef", fear: "--f", neutral: "--n", greed: "--g", extreme_greed: "--eg" };
+const SVGNS = "http://www.w3.org/2000/svg";
+
+function rating(v) {
+  if (v == null) return null;
+  if (v < 25) return "extreme_fear"; if (v < 45) return "fear"; if (v < 56) return "neutral";
+  if (v < 76) return "greed"; return "extreme_greed";
+}
+const pill = r => r ? `<span class="pill r-${r}">${RATING_CN[r]}</span>` : `<span class="pill r-neutral">—</span>`;
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const sign = v => (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v);
+const fmt1 = v => v == null ? "—" : (Math.round(v * 10) / 10).toFixed(1);
+const fmt0 = v => v == null ? "—" : String(Math.round(v));
+
+function fmtRaw(c) {
+  const v = c.raw;
+  if (v == null) return "—";
+  switch (c.fmt) {
+    case "pct": return sign((v * 100).toFixed(1)) + "%";
+    case "pct0": return (v * 100).toFixed(0) + "%";
+    case "pp_share": return sign((v * 100).toFixed(0)) + "%";
+    case "ratio": return v.toFixed(2);
+    case "pp": return sign((v * 100).toFixed(1)) + " 个百分点";
+    case "x": return Math.exp(v).toFixed(2) + " 倍";
+    default: return String(v);
+  }
+}
+
+function el(tag, attrs = {}, parent) {
+  const n = document.createElementNS(SVGNS, tag);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+  if (parent) parent.appendChild(n);
+  return n;
+}
+
+/* ---------- gauge ---------- */
+function gaugeSVG(score) {
+  const cx = 160, cy = 160, r = 122, w = 22;
+  const pt = (v, rad) => {
+    const a = Math.PI * (1 - v / 100);
+    return [cx + rad * Math.cos(a), cy - rad * Math.sin(a)];
+  };
+  const svg = el("svg", { viewBox: "0 0 320 190", class: "gauge", role: "img", "aria-label": `指数 ${fmt0(score)}，${RATING_CN[rating(score)]}` });
+  const active = rating(score);
+  for (const z of ZONES) {
+    const gap = 0.7;
+    const [x1, y1] = pt(z.from + (z.from ? gap : 0), r), [x2, y2] = pt(z.to - (z.to < 100 ? gap : 0), r);
+    el("path", {
+      d: `M${x1},${y1} A${r},${r} 0 0 1 ${x2},${y2}`, fill: "none",
+      stroke: `var(${ZONE_VAR[z.key]})`, "stroke-width": w,
+      opacity: z.key === active ? 1 : 0.32,
+    }, svg);
+    const mid = (z.from + z.to) / 2;
+    const [lx, ly] = pt(mid, r + 24);
+    const t = el("text", { x: lx, y: ly + 4, "text-anchor": "middle", class: "zone-label" }, svg);
+    t.textContent = RATING_CN[z.key];
+  }
+  for (const v of [0, 25, 50, 75, 100]) {
+    const [tx, ty] = pt(v, r - w / 2 - 12);
+    const t = el("text", { x: tx, y: ty + 4, "text-anchor": v === 0 ? "start" : v === 100 ? "end" : "middle" }, svg);
+    t.textContent = v;
+  }
+  const g = el("g", { class: "needle", style: `transform-origin:${cx}px ${cy}px; transform: rotate(${-90 + 180 * score / 100}deg)` }, svg);
+  el("path", { d: `M${cx - 4},${cy} L${cx},${cy - r + 16} L${cx + 4},${cy} Z`, fill: "var(--ink)" }, g);
+  el("circle", { cx, cy, r: 8, fill: "var(--ink)" }, svg);
+  el("circle", { cx, cy, r: 3, fill: "var(--surface)" }, svg);
+  return svg;
+}
+
+/* ---------- layout ---------- */
+function render() {
+  const app = document.getElementById("app");
+  if (!DATA) {
+    app.innerHTML = `<div class="panel empty">还没有数据。运行 <span class="num">python semi_fgi.py</span> 生成 output/semi_fgi.html。</div>`;
+    return;
+  }
+  const d = DATA;
+  const soxChg = d.sox_chg * 100;
+  const cnn = d.cnn;
+  const gapTxt = cnn ? (() => {
+    const g = Math.round(d.score - cnn.score);
+    if (Math.abs(g) < 3) return "半导体情绪与大盘基本一致。";
+    return `半导体比大盘${g < 0 ? "更恐慌" : "更贪婪"} <b class="num">${Math.abs(g)}</b> 点。`;
+  })() : "";
+
+  app.innerHTML = `
+  <header>
+    <div>
+      <div class="eyebrow">US Semiconductors · Fear &amp; Greed</div>
+      <h1>半导体恐慌贪婪指数</h1>
+    </div>
+    <div class="meta">
+      <span>数据截至 <b class="num">${d.as_of}</b></span>
+      <span>费城半导体指数 SOX <b class="num">${d.sox_last.toLocaleString("en-US", { maximumFractionDigits: 2 })}</b>
+        <b class="num ${soxChg >= 0 ? "up" : "down"}">${sign(soxChg.toFixed(2))}%</b></span>
+      <span id="market"></span>
+    </div>
+  </header>
+
+  <section class="hero">
+    <div class="panel gauge-panel" id="gauge"></div>
+    <div class="side">
+      <div class="panel compare">
+        <h3>历史读数</h3>
+        ${[["前一交易日", d.prev.close], ["一周前", d.prev["1_week"]], ["一个月前", d.prev["1_month"]], ["一年前", d.prev["1_year"]]]
+          .map(([k, v]) => `<div class="compare-row"><span>${k}</span><span class="num">${fmt0(v)}</span>${pill(rating(v))}</div>`).join("")}
+      </div>
+      ${cnn ? `
+      <div class="panel cnn">
+        <h3>对照：CNN 恐慌贪婪指数（美股大盘）</h3>
+        <div class="cnn-top"><span class="num">${fmt0(cnn.score)}</span>${pill(cnn.rating)}</div>
+        <p class="cnn-gap">${gapTxt}</p>
+        <div class="cnn-comps">${cnn.components.map(c => `<div><span>${esc(c.name)}</span><span class="num">${fmt0(c.score)}</span></div>`).join("")}</div>
+      </div>` : ""}
+    </div>
+  </section>
+
+  <section class="panel history">
+    <div class="section-head">
+      <h2>指数走势</h2>
+      <div class="controls">
+        <div class="seg" role="group" aria-label="时间范围" id="range">
+          ${[[91, "3 个月"], [365, "1 年"], [1095, "3 年"], [0, "全部"]].map(([n, t]) =>
+            `<button type="button" data-days="${n}" aria-pressed="${state.days === n}">${t}</button>`).join("")}
+        </div>
+        ${cnn ? `<label class="toggle"><input type="checkbox" id="show-cnn" ${state.showCnn ? "checked" : ""}> 叠加 CNN 指数</label>` : ""}
+      </div>
+    </div>
+    <div class="legend">
+      <span><i></i>半导体指数</span>
+      ${cnn ? `<span id="lg-cnn"><i class="cnn"></i>CNN 指数（大盘，仅近一年）</span>` : ""}
+      ${ZONES.map(z => `<span class="r-${z.key}"><i class="band"></i>${RATING_CN[z.key]}</span>`).join("")}
+    </div>
+    <div class="chart-wrap" id="hist">
+      <div class="chart-title">恐慌贪婪指数（0–100）</div>
+      <svg id="chart-idx" height="250"></svg>
+      <div class="chart-title" style="margin-top:12px">费城半导体指数 SOX</div>
+      <svg id="chart-sox" height="130"></svg>
+      <div class="tip" id="tip" hidden></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-head" style="margin-bottom:14px">
+      <h2>8 个分项</h2>
+      <p>每项按过去两年的分布打分，50 为两年均值；综合指数为等权平均。</p>
+    </div>
+    <div class="comps" id="comps"></div>
+  </section>
+
+  <section class="two">
+    <div class="panel">
+      <div class="section-head"><h2>各情绪区间之后一个月的 SOX 表现</h2></div>
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>指数区间</th><th>交易日数</th><th>平均涨跌</th><th>中位数</th><th>上涨概率</th></tr></thead>
+        <tbody>${d.forward.map(f => `<tr><td>${pill(f.rating)}</td><td>${f.days}</td>
+          <td class="${f.mean >= 0 ? "" : "down"}">${f.mean == null ? "—" : sign((f.mean * 100).toFixed(1)) + "%"}</td>
+          <td>${f.median == null ? "—" : sign((f.median * 100).toFixed(1)) + "%"}</td>
+          <td>${f.win_rate == null ? "—" : (f.win_rate * 100).toFixed(0) + "%"}</td></tr>`).join("")}</tbody>
+      </table></div>
+      <p class="note">统计区间 ${d.history.dates[0]} 至今，持有期 21 个交易日，按当日收盘的指数分区。样本只覆盖一轮半导体周期，区间之间的天数重叠严重，只能看方向，不能当作交易信号。</p>
+    </div>
+    <div class="panel">
+      <div class="section-head"><h2>期权 Put/Call 快照</h2></div>
+      ${Object.keys(d.putcall || {}).length ? `
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>标的</th><th>Put 成交</th><th>Call 成交</th><th>P/C 成交比</th><th>P/C 持仓比</th></tr></thead>
+        <tbody>${Object.entries(d.putcall).map(([t, v]) => `<tr><td class="num">${t}</td>
+          <td>${v.put_volume.toLocaleString()}</td><td>${v.call_volume.toLocaleString()}</td>
+          <td>${v.volume_ratio ?? "—"}</td><td>${v.oi_ratio ?? "—"}</td></tr>`).join("")}</tbody>
+      </table></div>` : `<p class="note">本次运行跳过了期权数据。</p>`}
+      <p class="note">${d.putcall_date ? `快照日期 ${d.putcall_date}，每个交易日收盘后更新一次。` : ""}取最近 6 个到期日合计。行业 ETF 的期权以机构对冲为主，P/C 比常年高于 1，单日数值无法直接判断情绪，所以不计入指数。快照每天记入 data/putcall_log.csv，积累一年后可作为分项。</p>
+    </div>
+  </section>
+
+  <section class="panel method">
+    <h2>编制方法</h2>
+    <ol>
+      <li><b>分项对应 CNN。</b>CNN 的 7 个分项（动能、股价强度、广度、Put/Call、波动率、避险需求、垃圾债需求）逐一换成半导体板块的数据，另加半导体特有的 SOXL/SOXS 杠杆资金。Put/Call 因 Yahoo 缺少期权历史，改用同样反映期权定价的 VIX 期限结构。</li>
+      <li><b>成分股 ${d.params.constituents.length} 只。</b>${d.params.constituents.join("、")}。上市不足 200 个交易日的股票不参与 52 周新高新低统计。</li>
+      <li><b>标准化。</b>每个分项取过去 ${d.params.z_window} 个交易日的均值和标准差算 z 值，再用正态分布函数映射到 0–100。波动率和期权情绪方向相反，数值越高分数越低。用两年而不是一年窗口，是因为动能这类慢变量在一年窗口下有 1/4 的天数顶格，读数改善时分数几乎不动。</li>
+      <li><b>综合。</b>8 个分项等权平均，至少 6 项有值才出数。分档沿用 CNN：0–24 极度恐慌，25–44 恐慌，45–55 中性，56–75 贪婪，76–100 极度贪婪。</li>
+    </ol>
+  </section>
+
+  <footer>数据来源：Yahoo Finance（行情、期权）、CNN Business（大盘恐慌贪婪指数）。仅供研究，不构成投资建议。</footer>
+  `;
+
+  document.getElementById("gauge").append(gaugeSVG(d.score));
+  document.getElementById("gauge").insertAdjacentHTML("beforeend",
+    `<div class="score-big num">${fmt0(d.score)}</div>
+     <div class="score-sub">${pill(d.rating)}<span class="num" style="color:var(--ink-2);font-size:13px">较前日 ${sign((d.score - d.prev.close).toFixed(1))}</span></div>
+     <p class="gauge-note">0 = 极度恐慌 · 100 = 极度贪婪</p>`);
+
+  const comps = document.getElementById("comps");
+  comps.innerHTML = d.components.map(c => `
+    <article class="panel comp">
+      <div class="comp-head"><h3>${esc(c.name)}</h3><span class="cnn-name">${esc(c.cnn)}</span></div>
+      <div class="comp-score"><span class="v num">${fmt0(c.score)}</span>${pill(c.rating)}</div>
+      <div class="track" aria-hidden="true">
+        ${ZONES.map(z => `<span class="r-${z.key}" style="flex:${z.to - z.from}"></span>`).join("")}
+        <i class="mark" style="left:${c.score ?? 50}%"></i>
+      </div>
+      <div class="raw"><span>${esc(c.label)}</span><span class="num">${fmtRaw(c)}</span></div>
+      <svg class="spark" data-key="${c.key}" aria-label="${esc(c.name)} 近一年得分"></svg>
+      <div class="spark-cap"><span>一年前</span><span>一周前 ${fmt0(c.week_ago)}</span></div>
+      <p class="desc">${esc(c.desc)}</p>
+    </article>`).join("");
+
+  setupHistory();
+  drawSparks();
+}
+
+/* ---------- sparklines ---------- */
+function drawSparks() {
+  for (const svg of document.querySelectorAll(".spark")) {
+    const c = DATA.components.find(x => x.key === svg.dataset.key);
+    const w = svg.clientWidth || 240, h = 44, pad = 4;
+    svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+    svg.innerHTML = "";
+    const vals = c.spark;
+    const x = i => pad + (w - 2 * pad) * i / (vals.length - 1);
+    const y = v => pad + (h - 2 * pad) * (1 - v / 100);
+    el("line", { x1: pad, x2: w - pad, y1: y(50), y2: y(50), stroke: "var(--line)", "stroke-dasharray": "3 3" }, svg);
+    let dPath = "", started = false;
+    vals.forEach((v, i) => {
+      if (v == null) { started = false; return; }
+      dPath += `${started ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`; started = true;
+    });
+    el("path", { d: `${dPath}`, fill: "none", stroke: "var(--ink-2)", "stroke-width": 1.5, "stroke-linejoin": "round" }, svg);
+    const li = vals.length - 1;
+    if (vals[li] != null) {
+      el("circle", { cx: x(li), cy: y(vals[li]), r: 4, fill: `var(${ZONE_VAR[rating(vals[li])]})`, stroke: "var(--surface)", "stroke-width": 2 }, svg);
+    }
+  }
+}
+
+/* ---------- history chart ---------- */
+const state = { days: 365, showCnn: true, hover: null };
+
+function setupHistory() {
+  const seg = document.getElementById("range");
+  seg.addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    seg.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+    state.days = +b.dataset.days;
+    try { localStorage.setItem("semi-fgi-range", b.dataset.days); } catch (_) {}
+    drawHistory();
+  });
+  try {
+    const saved = localStorage.getItem("semi-fgi-range");
+    const b = saved != null && seg.querySelector(`button[data-days="${saved}"]`);
+    if (b) b.click();
+  } catch (_) {}
+  const cb = document.getElementById("show-cnn");
+  if (cb) cb.addEventListener("change", () => { state.showCnn = cb.checked; drawHistory(); });
+  drawHistory();
+}
+
+function sliceHistory() {
+  const h = DATA.history;
+  let start = 0;
+  if (state.days) {
+    const cutoff = new Date(h.dates[h.dates.length - 1]);
+    cutoff.setDate(cutoff.getDate() - state.days);
+    const c = cutoff.toISOString().slice(0, 10);
+    start = h.dates.findIndex(d => d >= c);
+  }
+  const cnnH = DATA.cnn?.history || {};
+  return {
+    dates: h.dates.slice(start), idx: h.index.slice(start), sox: h.sox.slice(start),
+    cnn: h.dates.slice(start).map(d => cnnH[d] ?? null),
+  };
+}
+
+function niceTicks(min, max, n = 4) {
+  const span = max - min || 1;
+  const step0 = span / n, mag = 10 ** Math.floor(Math.log10(step0));
+  const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => s >= step0);
+  const ticks = [];
+  for (let v = Math.ceil(min / step) * step; v <= max + 1e-9; v += step) ticks.push(+v.toFixed(6));
+  return ticks;
+}
+
+function linePath(vals, x, y) {
+  let d = "", on = false;
+  vals.forEach((v, i) => {
+    if (v == null) { on = false; return; }
+    d += `${on ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`; on = true;
+  });
+  return d;
+}
+
+function xTicks(dates, x) {
+  const n = dates.length, out = [];
+  const multiYear = (new Date(dates[n - 1]) - new Date(dates[0])) > 400 * 864e5;
+  let last = "";
+  dates.forEach((d, i) => {
+    const key = multiYear ? d.slice(0, 4) : d.slice(0, 7);
+    if (key !== last) { if (i > 0) out.push({ i, label: multiYear ? key : d.slice(2, 7).replace("-", "/") }); last = key; }
+  });
+  const width = x(n - 1) - x(0);
+  const maxLabels = Math.max(2, Math.floor(width / 70));
+  const step = Math.ceil(out.length / maxLabels);
+  return out.filter((_, k) => k % step === 0);
+}
+
+function drawHistory() {
+  const s = sliceHistory();
+  const wrap = document.getElementById("hist");
+  const W = wrap.clientWidth;
+  const M = { l: 44, r: 10 };
+  const n = s.dates.length;
+  const x = i => M.l + (W - M.l - M.r) * (n > 1 ? i / (n - 1) : 0);
+  const showCnn = state.showCnn && DATA.cnn;
+  document.getElementById("tip").hidden = true;
+  const lg = document.getElementById("lg-cnn"); if (lg) lg.hidden = !showCnn;
+
+  // index chart
+  const svgI = document.getElementById("chart-idx");
+  const HI = 250, TI = 8, BI = 22;
+  const yI = v => TI + (HI - TI - BI) * (1 - v / 100);
+  svgI.setAttribute("viewBox", `0 0 ${W} ${HI}`);
+  svgI.innerHTML = "";
+  for (const z of ZONES) {
+    el("rect", { x: M.l, width: W - M.l - M.r, y: yI(z.to), height: yI(z.from) - yI(z.to),
+      fill: `color-mix(in srgb, var(${ZONE_VAR[z.key]}) 9%, transparent)` }, svgI);
+  }
+  const ax = el("g", { class: "axis" }, svgI);
+  for (const v of [0, 25, 50, 75, 100]) {
+    el("line", { class: "gridline", x1: M.l, x2: W - M.r, y1: yI(v), y2: yI(v) }, ax);
+    const t = el("text", { x: M.l - 8, y: yI(v) + 3.5, "text-anchor": "end" }, ax); t.textContent = v;
+  }
+  for (const t of xTicks(s.dates, x)) {
+    const tt = el("text", { x: x(t.i), y: HI - 5, "text-anchor": "middle" }, ax); tt.textContent = t.label;
+  }
+  if (showCnn) el("path", { d: linePath(s.cnn, x, yI), fill: "none", stroke: "var(--cnn)", "stroke-width": 1.5, "stroke-dasharray": "4 3", opacity: .9 }, svgI);
+  el("path", { d: linePath(s.idx, x, yI), fill: "none", stroke: "var(--ink)", "stroke-width": 2, "stroke-linejoin": "round" }, svgI);
+  const lastV = s.idx[n - 1];
+  el("circle", { cx: x(n - 1), cy: yI(lastV), r: 5, fill: `var(${ZONE_VAR[rating(lastV)]})`, stroke: "var(--surface)", "stroke-width": 2 }, svgI);
+
+  // sox chart
+  const svgS = document.getElementById("chart-sox");
+  const HS = 130, TS = 8, BS = 22;
+  const lo = Math.min(...s.sox), hi = Math.max(...s.sox);
+  const ticks = niceTicks(lo, hi, 3);
+  const y0 = Math.min(lo, ticks[0]), y1 = Math.max(hi, ticks[ticks.length - 1]);
+  const yS = v => TS + (HS - TS - BS) * (1 - (v - y0) / (y1 - y0 || 1));
+  svgS.setAttribute("viewBox", `0 0 ${W} ${HS}`);
+  svgS.innerHTML = "";
+  const ax2 = el("g", { class: "axis" }, svgS);
+  for (const v of ticks) {
+    el("line", { class: "gridline", x1: M.l, x2: W - M.r, y1: yS(v), y2: yS(v) }, ax2);
+    const t = el("text", { x: M.l - 8, y: yS(v) + 3.5, "text-anchor": "end" }, ax2);
+    t.textContent = v >= 1000 ? (v / 1000) + "k" : v;
+  }
+  for (const t of xTicks(s.dates, x)) {
+    const tt = el("text", { x: x(t.i), y: HS - 5, "text-anchor": "middle" }, ax2); tt.textContent = t.label;
+  }
+  const area = linePath(s.sox, x, yS) + `L${x(n - 1)},${yS(y0)}L${x(0)},${yS(y0)}Z`;
+  el("path", { d: area, fill: "color-mix(in srgb, var(--ink-2) 10%, transparent)" }, svgS);
+  el("path", { d: linePath(s.sox, x, yS), fill: "none", stroke: "var(--ink-2)", "stroke-width": 1.5 }, svgS);
+
+  // hover layer
+  const hoverI = el("g", { visibility: "hidden" }, svgI);
+  const vlI = el("line", { y1: TI, y2: HI - BI, stroke: "var(--ink-3)", "stroke-width": 1 }, hoverI);
+  const dotC = el("circle", { r: 4, fill: "var(--cnn)", stroke: "var(--surface)", "stroke-width": 2 }, hoverI);
+  const dotI = el("circle", { r: 4.5, fill: "var(--ink)", stroke: "var(--surface)", "stroke-width": 2 }, hoverI);
+  const hoverS = el("g", { visibility: "hidden" }, svgS);
+  const vlS = el("line", { y1: TS, y2: HS - BS, stroke: "var(--ink-3)", "stroke-width": 1 }, hoverS);
+  const dotS = el("circle", { r: 4, fill: "var(--ink-2)", stroke: "var(--surface)", "stroke-width": 2 }, hoverS);
+  const tip = document.getElementById("tip");
+
+  function show(evt) {
+    const svg = evt.currentTarget;
+    const rect = svg.getBoundingClientRect();
+    const px = (evt.clientX - rect.left) * (W / rect.width);
+    const i = Math.max(0, Math.min(n - 1, Math.round((px - M.l) / (W - M.l - M.r) * (n - 1))));
+    const xi = x(i);
+    for (const [g, l] of [[hoverI, vlI], [hoverS, vlS]]) { g.setAttribute("visibility", "visible"); l.setAttribute("x1", xi); l.setAttribute("x2", xi); }
+    dotI.setAttribute("cx", xi); dotI.setAttribute("cy", yI(s.idx[i]));
+    dotS.setAttribute("cx", xi); dotS.setAttribute("cy", yS(s.sox[i]));
+    const cv = showCnn ? s.cnn[i] : null;
+    dotC.setAttribute("visibility", cv == null ? "hidden" : "visible");
+    if (cv != null) { dotC.setAttribute("cx", xi); dotC.setAttribute("cy", yI(cv)); }
+    tip.innerHTML = `<div class="d">${s.dates[i]}</div>
+      <div class="row">半导体指数 <b>${fmt1(s.idx[i])}</b></div>
+      <div class="row">情绪 ${pill(rating(s.idx[i]))}</div>
+      ${cv != null ? `<div class="row">CNN 指数 <b>${fmt1(cv)}</b></div>` : ""}
+      <div class="row">SOX <b>${s.sox[i].toLocaleString("en-US", { maximumFractionDigits: 0 })}</b></div>`;
+    tip.hidden = false;
+    const wr = wrap.getBoundingClientRect();
+    const left = (xi / W) * wr.width;
+    const tw = tip.offsetWidth;
+    tip.style.left = (left + 14 + tw > wr.width ? left - tw - 14 : left + 14) + "px";
+    tip.style.top = (svg === svgI ? 30 : svgI.getBoundingClientRect().height + 40) + "px";
+  }
+  function hide() { hoverI.setAttribute("visibility", "hidden"); hoverS.setAttribute("visibility", "hidden"); tip.hidden = true; }
+  for (const [svg, H] of [[svgI, HI], [svgS, HS]]) {
+    const hit = el("rect", { x: M.l, y: 0, width: W - M.l - M.r, height: H, fill: "transparent" }, svg);
+    svg.onpointermove = show; svg.onpointerleave = hide;
+    hit.style.cursor = "crosshair";
+  }
+}
+
+/* ---------- 交易状态与自动刷新 ---------- */
+function updateMarket() {
+  const box = document.getElementById("market");
+  if (!box || !DATA) return;
+  const gen = new Date(DATA.generated_at);
+  const mins = Math.round((Date.now() - gen) / 60000);
+  const ago = mins < 1 ? "刚刚" : mins < 60 ? `${mins} 分钟前` : mins < 1440 ? `${Math.round(mins / 60)} 小时前` : `${Math.round(mins / 1440)} 天前`;
+  const time = gen.toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  const st = DATA.market?.state;
+  let cls = "live", label = "已收盘";
+  if (st === "open") { cls = mins > 30 ? "live stale" : "live on"; label = mins > 30 ? "盘中 · 更新延迟" : "盘中 · 约每 5 分钟更新"; }
+  else if (st === "pre") label = "盘前";
+  box.className = cls;
+  box.innerHTML = `${label} · 更新于 <span class="num">${time}</span>（${ago}）`;
+}
+
+async function poll() {
+  try {
+    const r = await fetch(`semi_fgi.json?t=${Date.now()}`, { cache: "no-store" });
+    if (!r.ok) return;
+    const next = await r.json();
+    if (next.generated_at !== DATA?.generated_at) {
+      const y = window.scrollY;
+      DATA = next;
+      render();
+      updateMarket();
+      window.scrollTo(0, y);
+    }
+  } catch (_) { /* 本地打开或网络中断时保持当前内容 */ }
+}
+
+render();
+updateMarket();
+if (DATA) {
+  let t;
+  new ResizeObserver(() => { clearTimeout(t); t = setTimeout(() => { drawHistory(); drawSparks(); }, 80); })
+    .observe(document.getElementById("app"));
+  setInterval(updateMarket, 30000);
+  if (location.protocol.startsWith("http")) {
+    setInterval(poll, 60000);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
+  }
+}
+</script>
