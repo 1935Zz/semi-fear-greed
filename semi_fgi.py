@@ -245,10 +245,11 @@ def compute(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, list[dict]]:
 
     hyg_ief = np.log(close["HYG"] / close["IEF"])
 
-    # 杠杆资金：先算每天 SOXL 与 SOXS 成交额之比，再取 10 日均值。
-    # 盘中当天成交量不完整，但当天的比值仍然有意义，不会被稀释
+    # 杠杆资金：先算每天 SOXL 与 SOXS 成交额之比，再取 5 日指数加权平均（当天权重 1/3）。
+    # 先算比值再平均：盘中当天成交量不完整，但当天的比值仍然有意义。
+    # 10 日简单平均时当天只占 1/10，资金转向要一周后才反映出来
     dollar = (close[["SOXL", "SOXS"]] * volume[["SOXL", "SOXS"]]).replace(0, np.nan)
-    lev = np.log(dollar["SOXL"] / dollar["SOXS"]).rolling(10).mean()
+    lev = np.log(dollar["SOXL"] / dollar["SOXS"]).ewm(span=5, adjust=False).mean()
 
     # 每个分项：原始值、方向（+1 越高越贪婪，-1 越高越恐慌）、展示格式
     specs = [
@@ -282,7 +283,7 @@ def compute(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, list[dict]]:
              desc="信用风险偏好，宏观层面的风险胃口。高收益债相对国债走强代表利差收窄、偏贪婪。对应 CNN 的垃圾债与投资级债利差。"),
         dict(key="leverage", name="杠杆资金", cnn="（半导体特有）",
              raw=lev, direction=1, fmt="x",
-             label="3 倍做多 SOXL 与 3 倍做空 SOXS 的成交额之比（10 日均值）",
+             label="3 倍做多 SOXL 与 3 倍做空 SOXS 的成交额之比（5 日指数加权平均）",
              desc="散户在半导体上的杠杆押注方向。做多成交额占比越高越贪婪。"),
     ]
 
