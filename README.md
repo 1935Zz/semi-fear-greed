@@ -16,9 +16,12 @@ open output/semi_fgi.html
 
 网址：https://1935zz.github.io/semi-fear-greed/
 
-GitHub Actions（`.github/workflows/update.yml`）在美东交易时间每 5 分钟触发一次 `ci.py`：
+cron-job.org 在美东 9–16 点（周一至周五）每 3 分钟调用一次 GitHub API，触发 `.github/workflows/update.yml` 运行 `ci.py`。
+请求为 `POST https://api.github.com/repos/1935Zz/semi-fear-greed/actions/workflows/update.yml/dispatches`，
+请求体 `{"ref":"main","inputs":{"force":"false"}}`，令牌是只对本仓库有 Actions 读写权限的 fine-grained token（到期需在 GitHub 重新生成并更新到 cron-job.org）。
+GitHub 自带的定时任务实测很少触发，只每 15 分钟留作备用。
 
-- 盘中：重新计算并发布网页。GitHub 的定时任务常有延迟，实际约 5–15 分钟刷新一次。
+- 盘中：重新计算并发布网页，从触发到网站生效约 1 分钟。
 - 收盘 15 分钟后：发布当天收盘版，抓取期权快照，并把当天数据提交到 `data/`。
 - 盘前、休市、周末：跳过，网站保持最近一次内容。
 

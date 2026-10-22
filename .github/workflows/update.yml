@@ -1,10 +1,11 @@
 name: 更新指数
 
-# 美东交易时间每 5 分钟触发一次。cron 用 UTC，13–21 点覆盖夏令时和冬令时的整个交易时段；
+# 主触发：cron-job.org 在美东 9–16 点每 3 分钟调用一次 workflow_dispatch（force=false）。
+# GitHub 自带的定时任务实测一天只触发了约 2 次，只留作备用。
 # 是否真正更新由 ci.py 按纽交所日历判断（盘前、休市、收盘版已完成时直接跳过）。
 on:
   schedule:
-    - cron: "*/5 13-21 * * 1-5"
+    - cron: "*/15 13-21 * * 1-5"
   workflow_dispatch:
     inputs:
       force:
