@@ -605,14 +605,15 @@ function updateMarket() {
   if (!box || !DATA) return;
   const gen = new Date(DATA.generated_at);
   const mins = Math.round((Date.now() - gen) / 60000);
-  const ago = mins < 1 ? "刚刚" : mins < 60 ? `${mins} 分钟前` : mins < 1440 ? `${Math.round(mins / 60)} 小时前` : `${Math.round(mins / 1440)} 天前`;
-  const time = gen.toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  const sameDay = gen.toDateString() === new Date().toDateString();
+  const time = gen.toLocaleString("zh-CN", { ...(sameDay ? {} : { month: "numeric", day: "numeric" }),
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
   const st = DATA.market?.state;
   let cls = "live", label = "已收盘";
   if (st === "open") { cls = mins > 15 ? "live stale" : "live on"; label = mins > 15 ? "盘中 · 更新延迟" : "盘中 · 约每 3 分钟更新"; }
   else if (st === "pre") label = "盘前";
   box.className = cls;
-  box.innerHTML = `${label} · 更新于 <span class="num">${time}</span>（${ago}）`;
+  box.innerHTML = `${label} · 数据时间 <span class="num">${time}</span>`;
 }
 
 async function poll() {
@@ -638,7 +639,7 @@ if (DATA) {
     .observe(document.getElementById("app"));
   setInterval(updateMarket, 30000);
   if (location.protocol.startsWith("http")) {
-    setInterval(poll, 60000);
+    setInterval(poll, 30000);
     document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
   }
 }

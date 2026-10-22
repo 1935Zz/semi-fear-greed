@@ -353,7 +353,7 @@ def build_payload(raws, scores, specs, cnn, putcall, putcall_date, market) -> di
         })
     score = round(float(idx.iloc[-1]), 1)
     return {
-        "generated_at": datetime.now().astimezone().isoformat(timespec="minutes"),
+        "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
         "as_of": last.strftime("%Y-%m-%d"),
         "score": score,
         "rating": rating(score),
