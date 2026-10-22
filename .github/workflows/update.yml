@@ -18,9 +18,11 @@ permissions:
   pages: write
   id-token: write
 
+# 新触发的运行直接取代还没跑完的旧运行：数据只要最新的，
+# 也避免某次发布卡住时后面的运行全部排队。收盘版如果被中途取代，下一次触发会重做
 concurrency:
   group: update
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   update:
@@ -71,9 +73,12 @@ jobs:
     needs: update
     if: needs.update.outputs.deploy == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+        with:
+          timeout: 240000
