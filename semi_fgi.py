@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import pickle
 import time
 from datetime import datetime, timezone
@@ -376,6 +377,8 @@ def build_payload(raws, scores, specs, cnn, putcall, putcall_date, market) -> di
         "putcall": putcall,
         "putcall_date": putcall_date,
         "market": market,
+        # 网页读取最新数据的地址（只在 GitHub Actions 里设置，本地运行时为空）
+        "live_url": os.environ.get("LIVE_URL"),
         "params": {"z_window": Z_WINDOW, "constituents": CONSTITUENTS},
     }
 

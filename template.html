@@ -610,25 +610,119 @@ function updateMarket() {
     hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
   const st = DATA.market?.state;
   let cls = "live", label = "已收盘";
-  if (st === "open") { cls = mins > 15 ? "live stale" : "live on"; label = mins > 15 ? "盘中 · 更新延迟" : "盘中 · 约每 3 分钟更新"; }
+  if (st === "open") { cls = mins > 15 ? "live stale" : "live on"; label = mins > 15 ? "盘中 · 更新延迟" : `盘中 · 约每 ${Math.max(1, Math.round(cadence / 60))} 分钟更新`; }
   else if (st === "pre") label = "盘前";
   box.className = cls;
   box.innerHTML = `${label} · 数据时间 <span class="num">${time}</span>`;
 }
 
-async function poll() {
-  try {
-    const r = await fetch(`semi_fgi.json?t=${Date.now()}`, { cache: "no-store" });
-    if (!r.ok) return;
-    const next = await r.json();
-    if (next.generated_at !== DATA?.generated_at) {
-      const y = window.scrollY;
-      DATA = next;
-      render();
-      updateMarket();
-      window.scrollTo(0, y);
+/* 数据来源有两个：
+   - live 分支上的 live.json，经 GitHub API 读取。每次计算完几秒内就能读到，但同一个 IP 每小时只能请求 60 次，
+     所以不固定轮询，而是推算下一份数据出现的时间，到点再取。
+   - GitHub Pages 上的 semi_fgi.json（完整历史）。发布后要过几分钟才生效，只用来补全历史和在 API 超限时兜底。 */
+let BASE = DATA;          // 最近一份完整数据
+let LIVE = null;          // 最近一份精简的最新数据
+let cadence = 180;        // 相邻两份数据的间隔（秒），按实际观察到的更新
+let skews = [];           // 最近几次「本机看到新数据的时刻 − 数据时间」，取最小值，抵消本机时钟误差
+let gaps = [];            // 最近几次相邻数据的间隔，取最小值，避免把漏掉一次更新当成间隔变长
+let learn = false;        // 连续观察到的相邻两份数据才用来学习间隔和时钟偏差（刚打开或切回页面的第一份不算）
+let misses = 0, apiBlockedUntil = 0, pollTimer = null, lastPagesPoll = 0;
+
+function mergeLive(base, live) {
+  const out = { ...live };
+  const h = { dates: [...base.history.dates], index: [...base.history.index], sox: [...base.history.sox] };
+  const n = h.dates.length - 1, L = live.last;
+  if (h.dates[n] === L.date) { h.index[n] = L.index; h.sox[n] = L.sox; }
+  else if (L.date > h.dates[n]) { h.dates.push(L.date); h.index.push(L.index); h.sox.push(L.sox); }
+  out.history = h;
+  const sameDay = base.as_of === live.as_of;
+  out.components = live.components.map(c => {
+    const spark = [...(base.components.find(x => x.key === c.key)?.spark || [])];
+    if (sameDay && spark.length) spark[spark.length - 1] = c.score;
+    else { spark.push(c.score); if (spark.length > 260) spark.shift(); }
+    return { ...c, spark };
+  });
+  if (live.cnn) {
+    const hist = { ...(base.cnn?.history || {}) };
+    if (live.cnn.last) hist[live.cnn.last.date] = live.cnn.last.value;
+    out.cnn = { ...live.cnn, history: hist };
+  }
+  return out;
+}
+
+function applyData() {
+  const next = LIVE && new Date(LIVE.generated_at) > new Date(BASE.generated_at) ? mergeLive(BASE, LIVE) : BASE;
+  if (next.generated_at === DATA.generated_at && next.history.dates.length === DATA.history.dates.length) return;
+  const y = window.scrollY;
+  DATA = next;
+  render();
+  updateMarket();
+  window.scrollTo(0, y);
+}
+
+async function pollPages() {
+  lastPagesPoll = Date.now();
+  const r = await fetch(`semi_fgi.json?t=${Date.now()}`, { cache: "no-store" });
+  if (!r.ok) return;
+  const full = await r.json();
+  if (new Date(full.generated_at) > new Date(BASE.generated_at)) { BASE = full; applyData(); }
+}
+
+// 返回 true 表示拿到了一份比之前新的数据
+async function pollLive() {
+  const url = BASE.live_url;
+  if (!url || Date.now() < apiBlockedUntil) return false;
+  const r = await fetch(url, { cache: "no-store", headers: { Accept: "application/vnd.github.raw+json" } });
+  if (r.status === 403 || r.status === 429) {
+    const reset = Number(r.headers.get("x-ratelimit-reset")) * 1000;
+    apiBlockedUntil = reset > Date.now() ? reset : Date.now() + 10 * 60000;
+    return false;
+  }
+  if (!r.ok) return false;
+  const live = await r.json();
+  if (LIVE && live.generated_at === LIVE.generated_at) return false;
+  if (LIVE && learn) {
+    const gap = (new Date(live.generated_at) - new Date(LIVE.generated_at)) / 1000;
+    if (gap >= 45 && gap <= 900) {
+      gaps = [...gaps.slice(-2), gap];
+      cadence = Math.max(60, Math.round(Math.min(...gaps) / 60) * 60);
     }
-  } catch (_) { /* 本地打开或网络中断时保持当前内容 */ }
+    skews = [...skews.slice(-7), Date.now() - new Date(live.generated_at)];
+  }
+  learn = true;
+  LIVE = live;
+  applyData();
+  return true;
+}
+
+// 美东周一到周五 9:25–16:30 之间才值得频繁检查
+function inSession() {
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short",
+    hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date()).map(x => [x.type, x.value]));
+  const mins = (Number(p.hour) % 24) * 60 + Number(p.minute);
+  return !["Sat", "Sun"].includes(p.weekday) && mins >= 565 && mins <= 990;
+}
+
+async function tick() {
+  clearTimeout(pollTimer);
+  if (document.hidden) return;      // 切回页面时由 visibilitychange 重新启动
+  let delay = 60;
+  try {
+    const fresh = await pollLive();
+    misses = fresh ? 0 : misses + 1;
+    const blocked = !BASE.live_url || Date.now() < apiBlockedUntil;
+    if (blocked || Date.now() - lastPagesPoll > 10 * 60000) await pollPages();
+    if (blocked) delay = 60;
+    else if (!inSession()) delay = 600;
+    else if (DATA.market?.state !== "open") delay = 120;
+    else if (fresh && skews.length) {
+      // 下一份数据预计在「这份的数据时间 + 间隔」后出现，换算到本机时钟再留 8 秒余量
+      const due = new Date(LIVE.generated_at).getTime() + cadence * 1000 + Math.min(...skews) + 8000;
+      delay = Math.max(10, (due - Date.now()) / 1000);
+    } else if (!skews.length && misses <= 12) delay = 20;   // 刚打开页面：每 20 秒看一次，直到见到第一份新数据
+    else delay = [10, 15, 30, 60][misses - 1] ?? 120;       // 该来的没来：逐步放慢，省着用请求次数
+  } catch (_) { /* 网络中断时保持当前内容，一分钟后再试 */ }
+  pollTimer = setTimeout(tick, delay * 1000);
 }
 
 render();
@@ -639,8 +733,8 @@ if (DATA) {
     .observe(document.getElementById("app"));
   setInterval(updateMarket, 30000);
   if (location.protocol.startsWith("http")) {
-    setInterval(poll, 30000);
-    document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
+    tick();
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) { misses = 0; learn = false; tick(); } });
   }
 }
 </script>
