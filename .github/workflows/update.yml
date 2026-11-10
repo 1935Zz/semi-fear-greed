@@ -22,12 +22,6 @@ permissions:
   pages: write
   id-token: write
 
-# 新触发的运行直接取代还没跑完的旧运行：数据只要最新的，
-# 也避免某次发布卡住时后面的运行全部排队。收盘版如果被中途取代，下一次触发会重做
-concurrency:
-  group: update
-  cancel-in-progress: true
-
 env:
   LIVE_URL: https://api.github.com/repos/${{ github.repository }}/contents/live.json?ref=live
 
@@ -35,6 +29,10 @@ jobs:
   update:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # 新触发的运行直接取代还没算完的旧运行：数据只要最新的。收盘版如果被中途取代，下一次触发会重做
+    concurrency:
+      group: update
+      cancel-in-progress: true
     outputs:
       pages: ${{ steps.run.outputs.pages }}
     steps:
@@ -102,6 +100,10 @@ jobs:
     if: needs.update.outputs.pages == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    # 发布不被后面的计算打断；卡住时也只影响发布，不影响 live 分支上的最新数据
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
