@@ -373,7 +373,7 @@ function render() {
     <h2>编制方法</h2>
     <ol>
       <li><b>分项对应 CNN。</b>CNN 的 7 个分项（动能、股价强度、广度、Put/Call、波动率、避险需求、垃圾债需求）逐一换成半导体板块的数据，另加半导体特有的 SOXL/SOXS 杠杆资金。Put/Call 因 Yahoo 缺少期权历史，改用同样反映期权定价的 VIX 期限结构。</li>
-      <li><b>成分股 ${d.params.constituents.length} 只。</b>${d.params.constituents.join("、")}。上市不足 200 个交易日的股票不参与 52 周新高新低统计。</li>
+      <li><b>成分股 ${d.params.constituents.length} 只。</b>${d.params.constituents.join("、")}。上市不足 48 个交易日的股票不参与新高新低统计。</li>
       <li><b>标准化。</b>每个分项取过去 ${d.params.z_window} 个交易日的均值和标准差算 z 值，再用正态分布函数映射到 0–100。波动率和期权情绪方向相反，数值越高分数越低。用两年而不是一年窗口，是因为动能这类慢变量在一年窗口下有 1/4 的天数顶格，读数改善时分数几乎不动。</li>
       <li><b>综合。</b>8 个分项等权平均，至少 6 项有值才出数。分档沿用 CNN：0–24 极度恐慌，25–44 恐慌，45–55 中性，56–75 贪婪，76–100 极度贪婪。</li>
     </ol>

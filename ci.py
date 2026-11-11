@@ -7,7 +7,7 @@
 - 其余时间（盘前、休市、当天收盘版已完成）：跳过，网站保持上一次的内容。
 
 环境变量 FORCE=true 时无论什么时间都更新一次（手动触发用）。
-结果通过 GITHUB_OUTPUT 输出 live、pages、commit（true/false）。
+结果通过 GITHUB_OUTPUT 输出 live、pages、commit、save_cache（true/false）。
 """
 
 import json
@@ -76,7 +76,7 @@ def main() -> None:
     mode = decide(now, force)
     print(f"{now.tz_convert(m.ET):%Y-%m-%d %H:%M} ET  模式: {mode}")
     if mode == "skip":
-        set_output(live=False, pages=False, commit=False)
+        set_output(live=False, pages=False, commit=False, save_cache=False)
         return
 
     payload = m.run(options=(mode == "final"))
@@ -93,7 +93,8 @@ def main() -> None:
         m.DATA.mkdir(exist_ok=True)
         shutil.copy(m.OUT / "semi_fgi_history.csv", FINAL_HISTORY)
     pages = force or mode == "final" or now.minute % PAGES_EVERY < PAGES_WINDOW
-    set_output(live=True, pages=pages, commit=(mode == "final"))
+    fresh = m.LAST_LOAD.get("full") and m.LAST_LOAD.get("complete")
+    set_output(live=True, pages=pages, commit=(mode == "final"), save_cache=bool(fresh))
 
 
 if __name__ == "__main__":

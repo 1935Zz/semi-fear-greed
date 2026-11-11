@@ -56,17 +56,26 @@ jobs:
       - id: day
         run: echo "date=$(TZ=America/New_York date +%F)" >> "$GITHUB_OUTPUT"
 
-      # 历史行情每天全量下载一次，当天后续运行复用
-      - uses: actions/cache@v4
+      # 历史行情每天全量下载一次，当天后续运行复用。只在真正完整下载后才保存（见下面的保存步骤）；
+      # 不能用 actions/cache 自动保存：盘前跳过的运行会把前一天的数据存成当天的，之后全天都命中这份旧缓存
+      - uses: actions/cache/restore@v4
         with:
           path: cache
-          key: prices-${{ steps.day.outputs.date }}
-          restore-keys: prices-
+          key: prices-${{ steps.day.outputs.date }}-
+          restore-keys: |
+            prices-${{ steps.day.outputs.date }}-
+            prices-
 
       - id: run
         env:
           FORCE: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.force) }}
         run: .venv/bin/python ci.py
+
+      - if: steps.run.outputs.save_cache == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: cache
+          key: prices-${{ steps.day.outputs.date }}-${{ github.run_id }}
 
       # 网页读的就是这个分支上的 live.json。每次用一个新的单独提交强制覆盖，分支不积累历史
       - name: 推送最新数据到 live 分支

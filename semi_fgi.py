@@ -50,7 +50,7 @@ OPTION_TICKERS = ["SMH", "SOXX", "SOXL"]
 Z_WINDOW = 504      # 标准化回看窗口：约两年。一年窗口下动能等慢变量有 1/4 的天数顶格
 Z_MIN = 252         # 至少一年数据才开始打分
 HISTORY_YEARS = 8
-NEAR_HL = 0.03      # 距 52 周高点/低点 3% 以内算"接近新高/新低"
+HL_WINDOW = 60      # 股价强度看 60 个交易日（约一个季度）的新高新低
 
 CNN_URL = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
 CNN_HEADERS = {
@@ -76,32 +76,38 @@ def rating(score: float | None) -> str | None:
 
 # ---------------------------------------------------------------- 数据获取
 
-def download(tickers: list[str], period: str) -> pd.DataFrame:
+def download(tickers: list[str], period: str, attempts: int = 3) -> pd.DataFrame:
+    """下载行情。Yahoo 被频繁请求时会让一批代码返回空数据，缺的代码分批重试，重试时放慢、不并发。"""
     yf.set_tz_cache_location(str(OUT / ".yf_cache"))
-    kw = dict(period=period, auto_adjust=True, progress=False, threads=True)
 
     def missing_in(df):
         close = df["Close"]
         return [t for t in tickers if t not in close or close[t].notna().sum() == 0]
 
-    df = yf.download(tickers, **kw)
+    df = yf.download(tickers, period=period, auto_adjust=True, progress=False, threads=True)
     missing = missing_in(df)
-    if missing:  # Yahoo 偶尔单个代码失败，单独重试一次
-        time.sleep(2)
-        extra = yf.download(missing, **kw)
+    for i in range(1, attempts):
+        if not missing:
+            break
+        time.sleep(3 * i)
+        extra = yf.download(missing, period=period, auto_adjust=True, progress=False, threads=False)
         df = df.drop(columns=missing, level=1, errors="ignore").join(extra, how="outer")
         missing = missing_in(df)
     if "^SOX" in missing:
         raise RuntimeError("费城半导体指数 ^SOX 下载失败，请稍后重试")
     if missing:
-        print(f"  ! 无数据，已跳过: {', '.join(missing)}")
+        print(f"  ! 重试 {attempts} 次后仍无数据: {', '.join(missing)}")
     return df
+
+
+LAST_LOAD: dict = {}   # 最近一次 load_prices 的情况，供 ci.py 判断要不要保存缓存
 
 
 def load_prices(tickers: list[str]) -> pd.DataFrame:
     """每个交易日第一次运行时下载全部历史并缓存，之后只下载最近 10 天覆盖上去。
 
     每天重下一次全量，是因为复权价格会随分红、拆股整体调整，不能一直在旧数据后面追加。
+    全量下载缺了代码时，沿用上一份缓存里的数据；行情指标有缺或缺得太多时不写缓存，下次运行重新下载。
     """
     today = pd.Timestamp.now(tz=ET).date()
     cached = None
@@ -115,14 +121,31 @@ def load_prices(tickers: list[str]) -> pd.DataFrame:
         old = cached["df"]
         # 已退市的（比如 2026-10 并入 Skyworks 的 QRVO）保留历史，但不再请求
         cutoff = pd.Timestamp(today) - pd.Timedelta(days=15)
-        active = [t for t in tickers if (old["Close"][t].last_valid_index() or cutoff) > cutoff]
+        active = [t for t in tickers if t in old["Close"] and (old["Close"][t].last_valid_index() or cutoff) > cutoff]
         print(f"  使用今天的历史缓存，只下载最近 10 天（{len(active)} 个代码）")
         recent = download(active, "10d")
+        LAST_LOAD.clear(); LAST_LOAD.update(full=False, complete=True)
         return recent.combine_first(old).sort_index()
 
+    print("  下载全部历史行情")
     df = download(tickers, f"{HISTORY_YEARS}y")
-    CACHE.parent.mkdir(exist_ok=True)
-    CACHE.write_bytes(pickle.dumps({"built": today, "years": HISTORY_YEARS, "tickers": tickers, "df": df}))
+    close = df["Close"]
+    missing = [t for t in tickers if t not in close or close[t].notna().sum() == 0]
+    if missing and cached:
+        old = cached["df"]
+        keep = [t for t in missing if t in old["Close"] and old["Close"][t].notna().any()]
+        if keep:
+            cols = [c for c in old.columns if c[1] in keep]
+            df = df.drop(columns=keep, level=1, errors="ignore").join(old[cols], how="outer").sort_index()
+            print(f"  沿用 {cached.get('built')} 的缓存数据: {', '.join(keep)}")
+            missing = [t for t in missing if t not in keep]
+    complete = not any(t in MARKET for t in missing) and len(missing) <= 3
+    if complete:
+        CACHE.parent.mkdir(exist_ok=True)
+        CACHE.write_bytes(pickle.dumps({"built": today, "years": HISTORY_YEARS, "tickers": tickers, "df": df}))
+    else:
+        print(f"  ! 数据不完整（缺 {', '.join(missing)}），不写缓存，下次运行重新下载")
+    LAST_LOAD.clear(); LAST_LOAD.update(full=True, complete=complete)
     return df
 
 
@@ -216,13 +239,15 @@ def compute(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, list[dict]]:
     stocks = [t for t in CONSTITUENTS if t in close and close[t].notna().sum() > 0]
     px = close[stocks]
 
-    # 股价强度：接近 52 周新高的家数减去接近新低的家数，占有效家数的比例（CNN 的做法）
-    hi = px.rolling(252, min_periods=200).max()
-    lo = px.rolling(252, min_periods=200).min()
+    # 股价强度：创 60 日新高的家数减去创新低的家数，占有效家数的比例，取 5 日均值。
+    # CNN 用 52 周新高新低，但成分股只有 54 只，52 周口径下大跌途中多数股票离两头都远，
+    # 读数会连续多天卡在同一个值（2021-07 以来 21% 的交易日原始值不变），也和板块动能高度重复
+    hi = px.rolling(HL_WINDOW, min_periods=int(HL_WINDOW * 0.8)).max()
+    lo = px.rolling(HL_WINDOW, min_periods=int(HL_WINDOW * 0.8)).min()
     has_range = hi.notna() & px.notna()   # 已退市的不再计入分母
-    near_hi = ((px >= hi * (1 - NEAR_HL)) & has_range).sum(axis=1)
-    near_lo = ((px <= lo * (1 + NEAR_HL)) & has_range).sum(axis=1)
-    net_hl = (near_hi - near_lo) / has_range.sum(axis=1).replace(0, np.nan)
+    new_hi = ((px >= hi) & has_range).sum(axis=1)
+    new_lo = ((px <= lo) & has_range).sum(axis=1)
+    net_hl = ((new_hi - new_lo) / has_range.sum(axis=1).replace(0, np.nan)).rolling(5).mean()
 
     # 股价广度：上涨股成交量减下跌股成交量，占总成交量的比例，取 10 日均值。
     # 比"站上均线比例"更接近 CNN 的 McClellan 成交量指标，也和动能重复得少
@@ -260,8 +285,8 @@ def compute(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, list[dict]]:
              desc="SOX 高于 125 日均线越多，追涨情绪越强。对应 CNN 的 S&P 500 相对 125 日均线。"),
         dict(key="strength", name="股价强度", cnn="Stock Price Strength",
              raw=net_hl, direction=1, fmt="pp_share",
-             label="接近 52 周新高的家数减接近新低的家数",
-             desc="距 52 周高点 3% 以内算接近新高，距低点 3% 以内算接近新低，按占成分股的比例计。对应 CNN 的 52 周新高与新低家数之差。"),
+             label="创 60 日新高的家数减创新低的家数（5 日均值）",
+             desc="按占成分股的比例计。对应 CNN 的 52 周新高与新低家数之差；成分股只有 54 只，52 周口径下读数常连续多天不动，所以改看一个季度。"),
         dict(key="breadth", name="股价广度", cnn="Stock Price Breadth",
              raw=breadth, direction=1, fmt="pp_share",
              label="上涨股成交量减下跌股成交量，占总成交量（10 日均值）",
