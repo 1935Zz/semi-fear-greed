@@ -423,6 +423,60 @@ def peer_medians(stocks: dict) -> dict:
     return out
 
 
+REV_POINTS = [("90daysAgo", "90 天前"), ("60daysAgo", "60 天前"), ("30daysAgo", "30 天前"),
+              ("7daysAgo", "7 天前"), ("current", "当前")]
+REV_LOG_KEEP = 800
+
+
+def sector_revisions(stocks: dict, period: str = "+1y") -> dict:
+    """全行业盈利预期修正：分析师上调 / 下调的次数（修正广度）、每家公司预期的变化，
+    以及用当前市值加权、以 90 天前为 100 的预期走势。默认看下一财年（period="+1y"，大多对应 2027 年）。"""
+    rows, up30, dn30, up7, dn7 = [], 0, 0, 0, 0
+    for sym in TICKERS:
+        st = stocks.get(sym) or {}
+        t = (st.get("eps_trend") or {}).get(period) or {}
+        r = (st.get("eps_rev") or {}).get(period) or {}
+        u30, d30 = int(r.get("upLast30days") or 0), int(r.get("downLast30days") or 0)
+        u7, d7 = int(r.get("upLast7days") or 0), int(r.get("downLast7Days") or 0)
+        up30, dn30, up7, dn7 = up30 + u30, dn30 + d30, up7 + u7, dn7 + d7
+        cur = t.get("current")
+        ch = lambda k: rnd(cur / t[k] - 1) if cur and t.get(k) and t[k] > 0 else None
+        rows.append({"symbol": sym, "name": st.get("name"), "eps": cur, "chg7": ch("7daysAgo"), "chg30": ch("30daysAgo"),
+                     "chg90": ch("90daysAgo"), "up30": u30, "down30": d30, "cap": st.get("market_cap"),
+                     "path": [t.get(k) for k, _ in REV_POINTS]})
+    # 市值加权：每家公司各时点的预期除以 90 天前的预期，再按当前市值加权
+    ok = [r for r in rows if r["cap"] and all(v and v > 0 for v in r["path"])]
+    wsum = sum(r["cap"] for r in ok)
+    weighted = [round(100 * sum(r["cap"] * r["path"][i] / r["path"][0] for r in ok) / wsum, 2) if wsum else None
+                for i in range(len(REV_POINTS))]
+    median = [round(100 * float(np.median([r["path"][i] / r["path"][0] for r in ok])), 2) if ok else None
+              for i in range(len(REV_POINTS))]
+    breadth = lambda u, d: rnd((u - d) / (u + d)) if u + d else None
+    net = [r["up30"] - r["down30"] for r in rows]
+    for r in rows:
+        r.pop("path"); r.pop("cap")
+    return {
+        "period": period,
+        "labels": [lab for _, lab in REV_POINTS],
+        "weighted": weighted, "median": median, "n": len(ok),
+        "up30": up30, "down30": dn30, "breadth30": breadth(up30, dn30),
+        "up7": up7, "down7": dn7, "breadth7": breadth(up7, dn7),
+        "net_up": sum(n > 0 for n in net), "net_down": sum(n < 0 for n in net), "net_flat": sum(n == 0 for n in net),
+        "stocks": rows,
+    }
+
+
+def log_revisions(data: dict, rev: dict) -> None:
+    """每天记一条全行业修正情况（基本面刷新时），积累起来看修正方向什么时候转向。同一天重复刷新只留最后一条。"""
+    day = pd.Timestamp.now(tz=m.ET).strftime("%Y-%m-%d")
+    w = rev["weighted"]
+    entry = {"date": day, "breadth30": rev["breadth30"], "breadth7": rev["breadth7"],
+             "up30": rev["up30"], "down30": rev["down30"], "net_up": rev["net_up"], "net_down": rev["net_down"],
+             "chg30_w": rnd(w[-1] / w[2] - 1) if w[2] else None, "chg90_w": rnd(w[-1] / 100 - 1) if w[-1] else None}
+    log = [e for e in data.get("revision_log", []) if e["date"] != day] + [entry]
+    data["revision_log"] = log[-REV_LOG_KEEP:]
+
+
 def price_history(df: pd.DataFrame | None) -> dict:
     if df is None:
         return {}
@@ -478,6 +532,9 @@ def update(full: bool, news: bool, df: pd.DataFrame | None = None) -> dict:
             s["price"], s["prev_close"] = closes[-1], closes[-2] if len(closes) > 1 else s.get("prev_close")
     data["order"] = TICKERS
     data["peers"] = peer_medians(stocks)
+    data["revisions"] = sector_revisions(stocks)
+    if full:
+        log_revisions(data, data["revisions"])
     for sym in TICKERS:
         stocks[sym]["notes"] = notes(sym, stocks[sym], data["peers"])
     data["generated_at"] = now_iso()
