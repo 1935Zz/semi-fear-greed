@@ -377,7 +377,7 @@ function renderRevisions() {
       <div class="card"><div class="sub-h"><h3>各公司预期变化</h3>
           <div class="seg" role="group" aria-label="时间窗口">${[["chg7", "7 天"], ["chg30", "30 天"], ["chg90", "90 天"]].map(([k, l]) =>
             `<button type="button" data-w="${k}" aria-pressed="${revState.win === k}">${l}</button>`).join("")}</div></div>
-        <p class="cap">明年 EPS 一致预期的变化；右侧为近 30 天上调 / 下调的分析师人次。点公司名看详情</p>
+        <p class="cap">${revCap()}</p>
         <svg class="chart" id="c-revbars" height="${DATA.order.length * 22 + 8}"></svg></div>
     </div>
     <div class="card" style="margin-top:16px"><h3>修正广度的变化</h3>
@@ -387,6 +387,13 @@ function renderRevisions() {
     </div>`;
   box.querySelector(".seg").onclick = e => { const b = e.target.closest("button"); if (!b) return; revState.win = b.dataset.w; renderRevisions(); };
   drawRevPath(R); drawRevBars(R); if (log.length >= 2) drawRevLog(log);
+}
+
+// 右侧的上调 / 下调人次跟随所选窗口。Yahoo 只给 7 天和 30 天的人次，选 90 天时人次仍是近 30 天
+const REV_WIN = { chg7: ["7 天", "7"], chg30: ["30 天", "30"], chg90: ["90 天", "30"] };
+function revCap() {
+  const [lab, cnt] = REV_WIN[revState.win];
+  return `明年 EPS 一致预期近 ${lab}的变化；右侧为近 ${cnt} 天上调 / 下调的分析师人次${revState.win === "chg90" ? "（Yahoo 不提供 90 天的人次）" : ""}。点公司名看详情`;
 }
 
 function drawRevPath(R) {
@@ -424,7 +431,8 @@ function drawRevBars(R) {
       txt(g, v >= 0 ? zx + len + 4 : zx - len - 4, yc + 4, pct(v, 1), { "text-anchor": v >= 0 ? "start" : "end" });
     }
     const t = el("text", { x: W, y: yc + 4, "text-anchor": "end" }, g);
-    t.innerHTML = `<tspan fill="var(--pos)">${r.up30}</tspan> / <tspan fill="var(--neg)">${r.down30}</tspan>`;
+    const n = REV_WIN[k][1], up = r["up" + n] ?? (n === "7" ? null : r.up30), dn = r["down" + n] ?? (n === "7" ? null : r.down30);
+    t.innerHTML = up == null ? "—" : `<tspan fill="var(--pos)">${up}</tspan> / <tspan fill="var(--neg)">${dn}</tspan>`;
   });
 }
 

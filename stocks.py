@@ -442,7 +442,7 @@ def sector_revisions(stocks: dict, period: str = "+1y") -> dict:
         cur = t.get("current")
         ch = lambda k: rnd(cur / t[k] - 1) if cur and t.get(k) and t[k] > 0 else None
         rows.append({"symbol": sym, "name": st.get("name"), "eps": cur, "chg7": ch("7daysAgo"), "chg30": ch("30daysAgo"),
-                     "chg90": ch("90daysAgo"), "up30": u30, "down30": d30, "cap": st.get("market_cap"),
+                     "chg90": ch("90daysAgo"), "up30": u30, "down30": d30, "up7": u7, "down7": d7, "cap": st.get("market_cap"),
                      "path": [t.get(k) for k, _ in REV_POINTS]})
     # 市值加权：每家公司各时点的预期除以 90 天前的预期，再按当前市值加权
     ok = [r for r in rows if r["cap"] and all(v and v > 0 for v in r["path"])]
