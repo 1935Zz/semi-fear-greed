@@ -467,9 +467,17 @@ function drawAnalyst(s, d) {
 }
 
 /* ---------- 盘中价格：读 live 分支上的 live.json（与恐慌贪婪指数页同一份），每 3 分钟一次 ---------- */
+function inSession() {   // 美东周一至周五 9:25–16:30，其余时间价格不会变，不占 GitHub API 额度
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", weekday: "short",
+    hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date()).map(x => [x.type, x.value]));
+  const mins = (Number(p.hour) % 24) * 60 + Number(p.minute);
+  return !["Sat", "Sun"].includes(p.weekday) && mins >= 565 && mins <= 990;
+}
+let polledOnce = false;
 async function pollQuotes() {
   const url = CFG.live_url || DATA?.live_url;
-  if (!DATA || !url || document.hidden) return;
+  if (!DATA || !url || document.hidden || (polledOnce && !inSession())) return;
+  polledOnce = true;   // 打开页面时读一次（可能有比个股数据更新的收盘价），之后只在盘中轮询
   try {
     const r = await fetch(url, { cache: "no-store", headers: { Accept: "application/vnd.github.raw+json" } });
     if (!r.ok) return;
