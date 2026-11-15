@@ -142,6 +142,11 @@ def fx_usd(cur: str | None) -> float:
     return float(h.iloc[-1])
 
 
+# Yahoo 给这些公司的每股数据（TTM / 远期 EPS、历史 EPS 与预期、预期趋势）也用财报货币，而不是美元。
+# 台积电不在其中：它的 EPS 和预期是每份 ADR 的美元。
+EPS_IN_FIN_CCY = {"ASML"}
+
+
 def to_usd(d: dict, sym: str, info: dict) -> None:
     """台积电、阿斯麦等公司的财报以本币披露，Yahoo 的季报、营收预期、TTM 营收也是本币，
     而价格、市值、EPS 预期是美元。这里把营收类数据统一换成美元，并重算市销率和 EV/EBITDA。"""
@@ -165,6 +170,27 @@ def to_usd(d: dict, sym: str, info: dict) -> None:
     if d.get("revenue_ttm"):
         d["revenue_ttm"] *= r
         d["ps_ttm"] = rnd(d["market_cap"] / d["revenue_ttm"], 2) if d.get("market_cap") else None
+    if sym in EPS_IN_FIN_CCY:
+        for k in ["eps_ttm", "eps_fwd"]:
+            if d.get(k) is not None:
+                d[k] = rnd(d[k] * r, 3)
+        price = d.get("fundamentals_price") or d.get("price")
+        d["pe_ttm"] = rnd(price / d["eps_ttm"], 2) if price and d.get("eps_ttm", 0) > 0 else None
+        d["pe_fwd"] = rnd(price / d["eps_fwd"], 2) if price and d.get("eps_fwd", 0) > 0 else None
+        for x in d["surprises"]:
+            for k in ["actual", "estimate"]:
+                if x.get(k) is not None:
+                    x[k] = rnd(x[k] * r, 3)
+        for e in d["eps_est"].values():
+            for k in ["avg", "low", "high", "yearAgoEps"]:
+                if e.get(k) is not None:
+                    e[k] = rnd(e[k] * r, 4)
+        for e in d["eps_trend"].values():
+            for k in list(e):
+                if e[k] is not None:
+                    e[k] = rnd(e[k] * r, 4)
+        if d.get("next_earnings", {}).get("eps_avg") is not None:
+            d["next_earnings"]["eps_avg"] = rnd(d["next_earnings"]["eps_avg"] * r, 3)
     debt, cash, ebitda = num(info.get("totalDebt")), num(info.get("totalCash")), num(info.get("ebitda"))
     if d.get("market_cap") and ebitda and ebitda > 0:
         ev = d["market_cap"] + ((debt or 0) - (cash or 0)) * r
