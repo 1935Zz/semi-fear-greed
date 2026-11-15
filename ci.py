@@ -7,6 +7,7 @@
 - 其余时间（盘前、休市、当天收盘版已完成）：跳过，网站保持上一次的内容。
 
 环境变量 FORCE=true 时无论什么时间都更新一次（手动触发用）。
+个股看盘的基本面和新闻抓取较慢（1–3 分钟），放在工作流里单独的 stocks 任务（stocks.py --ci），不拖慢指数更新。
 结果通过 GITHUB_OUTPUT 输出 live、pages、commit、save_cache（true/false）。
 """
 
@@ -18,6 +19,7 @@ from pathlib import Path
 import pandas as pd
 
 import semi_fgi as m
+import stocks
 
 FINAL_DELAY = pd.Timedelta(minutes=15)   # 收盘后等 Yahoo 的日线数据定稿
 PAGES_EVERY = 15                         # 盘中每隔多少分钟发布一次 GitHub Pages
@@ -61,6 +63,19 @@ def slim(p: dict) -> dict:
     return live
 
 
+def quotes(df: pd.DataFrame | None) -> dict:
+    """个股看盘页用的最新价和前收：{代码: [最新价, 前收]}。"""
+    if df is None:
+        return {}
+    out = {}
+    for sym in stocks.TICKERS:
+        if sym in df["Close"]:
+            c = df["Close"][sym].dropna()
+            if len(c) >= 2:
+                out[sym] = [round(float(c.iloc[-1]), 2), round(float(c.iloc[-2]), 2)]
+    return out
+
+
 def set_output(**kv) -> None:
     path = os.environ.get("GITHUB_OUTPUT")
     lines = [f"{k}={str(v).lower()}" for k, v in kv.items()]
@@ -81,14 +96,18 @@ def main() -> None:
 
     payload = m.run(options=(mode == "final"))
 
+    live = slim(payload)
+    live["quotes"] = quotes(m.LAST_DF)
     LIVE.mkdir(exist_ok=True)
-    (LIVE / "live.json").write_text(json.dumps(slim(payload), ensure_ascii=False, separators=(",", ":")),
-                                    encoding="utf-8")
+    (LIVE / "live.json").write_text(json.dumps(live, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
 
     SITE.mkdir(exist_ok=True)
     shutil.copy(m.OUT / "semi_fgi.html", SITE / "index.html")
     shutil.copy(m.OUT / "semi_fgi.json", SITE / "semi_fgi.json")
     (SITE / ".nojekyll").touch()
+    # 个股看盘页不内嵌数据：打开时读 stocks 分支上的 stocks.json（由工作流里的 stocks 任务刷新）
+    (SITE / "stocks.html").write_text(stocks.render(None, {
+        "stocks_url": os.environ.get("STOCKS_URL"), "live_url": os.environ.get("LIVE_URL")}), encoding="utf-8")
     if mode == "final":
         m.DATA.mkdir(exist_ok=True)
         shutil.copy(m.OUT / "semi_fgi_history.csv", FINAL_HISTORY)

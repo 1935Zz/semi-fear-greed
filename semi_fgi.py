@@ -101,6 +101,7 @@ def download(tickers: list[str], period: str, attempts: int = 3) -> pd.DataFrame
 
 
 LAST_LOAD: dict = {}   # 最近一次 load_prices 的情况，供 ci.py 判断要不要保存缓存
+LAST_DF: pd.DataFrame | None = None   # 最近一次 run() 用的行情，供 ci.py 取个股最新价
 
 
 def load_prices(tickers: list[str]) -> pd.DataFrame:
@@ -442,7 +443,8 @@ def run(options: bool = True, cnn: bool = True) -> dict:
     OUT.mkdir(exist_ok=True)
     market = market_status()
     print("下载行情 …")
-    df = load_prices(MARKET + CONSTITUENTS)
+    global LAST_DF
+    df = LAST_DF = load_prices(MARKET + CONSTITUENTS)
     print("计算分项 …")
     raws, scores, specs = compute(df)
     cnn_data = fetch_cnn() if cnn else None

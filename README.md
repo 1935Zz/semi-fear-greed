@@ -39,6 +39,22 @@ GitHub Pages 的发布显示成功后，实测还要 2–5 分钟才真正换成
 
 要手动更新，在仓库的 Actions 页面选"更新指数"，点 Run workflow。
 
+### 个股看盘
+
+网址：https://1935zz.github.io/semi-fear-greed/stocks.html（可加 `#NVDA` 直接打开某只）
+
+16 家美股上市的大型半导体公司（`stocks.py` 里的 `STOCKS`），每家一页：要点、一年走势、季度营收（含分析师预期）、
+EPS 实际与预期、估值相对同行中位数、EPS 一致预期的变化、分析师评级与目标价、最近新闻。
+
+- 数据来自 Yahoo Finance。新闻先试 Yahoo，Yahoo 新闻接口限流时改用 Google News RSS。没有用 Investing.com（不允许抓取）。
+- 台积电、阿斯麦的财报以本币披露，营收、利润、营收预期按最新汇率换成美元，市销率和 EV/EBITDA 据此重算。
+- "要点"由程序按数据整理，只描述数据，不给买卖建议。
+- 工作流里单独的 `stocks` 任务运行 `stocks.py --ci`：基本面每个交易日第一次运行时刷新，新闻每小时刷新，
+  结果强制推到 `stocks` 分支，网页打开时从 raw.githubusercontent.com 读取（约 5 分钟缓存）。
+- 盘中价格来自 `live.json` 里的 `quotes`，网页可见时每 3 分钟读一次；估值倍数随最新价换算。
+  两个页面同时开着时，GitHub API 用量合计每小时约 45 次。
+- 本地：`.venv/bin/python stocks.py` 生成 `output/stocks.html`（数据内嵌），`--news-only` 只刷新新闻。
+
 ## 输出
 
 | 文件 | 内容 |

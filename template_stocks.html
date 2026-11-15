@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>半导体个股看盘</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+<style>
+/* Layout: 看盘页。顶部总览表（可排序、点选），下方是选中个股的详情：要点、走势、营收与 EPS、估值对比、分析师、新闻。
+   和恐慌贪婪指数页共用一套冷灰底色与字体；颜色只表达方向：上涨 / 正面为蓝，下跌 / 负面为暖红。 */
+:root {
+  --bg: #eef1f2;
+  --surface: #ffffff;
+  --ink: #111a1f;
+  --ink-2: #4c5a63;
+  --ink-3: #7b8891;
+  --line: #d6dde0;
+  --grid: #e7ecee;
+  --hover: #f3f6f7;
+  --pos: #2f74c8;
+  --pos-soft: #5598e7;
+  --neg: #c8362f;
+  --neg-soft: #e07a4f;
+  --neu: #9aa3a8;
+  --est: #b9c7d1;
+  --font-display: "Barlow Condensed", "Arial Narrow", "Noto Sans SC", sans-serif;
+  --font-body: "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-data: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1315; --surface: #161d20; --ink: #e8eef0; --ink-2: #a9b6bc; --ink-3: #76848b;
+    --line: #2a3539; --grid: #1f282c; --hover: #1c2529;
+    --pos: #6da7ec; --pos-soft: #3987e5; --neg: #e66767; --neg-soft: #e8875a; --neu: #6f7a80; --est: #3a4b57;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1315; --surface: #161d20; --ink: #e8eef0; --ink-2: #a9b6bc; --ink-3: #76848b;
+  --line: #2a3539; --grid: #1f282c; --hover: #1c2529;
+  --pos: #6da7ec; --pos-soft: #3987e5; --neg: #e66767; --neg-soft: #e8875a; --neu: #6f7a80; --est: #3a4b57;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.6; }
+.page {
+  max-width: 1180px; margin: 0 auto; padding-block: 28px 56px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 24px;
+}
+h1, h2, h3 { margin: 0; text-wrap: balance; }
+p { margin: 0; }
+a { color: inherit; }
+.num { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+.eyebrow { font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-family: var(--font-data); }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 20px; min-width: 0; }
+.muted { color: var(--ink-3); }
+.up { color: var(--pos); } .down { color: var(--neg); }
+
+header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px 24px; }
+header h1 { font-size: clamp(26px, 4vw, 34px); font-weight: 700; margin-top: 4px; }
+.meta { display: flex; flex-wrap: wrap; gap: 4px 18px; color: var(--ink-2); font-size: 13px; }
+.nav { font-size: 13.5px; color: var(--ink-2); text-decoration: none; border: 1px solid var(--line); border-radius: 8px; padding: 4px 12px; background: var(--surface); }
+.nav:hover { color: var(--ink); border-color: var(--ink-3); }
+.nav:focus-visible, th button:focus-visible, tbody tr:focus-visible { outline: 2px solid var(--pos); outline-offset: 2px; }
+
+/* 总览表 */
+.tbl-wrap { overflow-x: auto; margin-inline: -20px; padding-inline: 20px; }
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+th { text-align: right; font-weight: 500; color: var(--ink-3); font-size: 12px; padding: 0; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th button { all: unset; cursor: pointer; display: block; padding: 6px 8px; width: 100%; box-sizing: border-box; text-align: inherit; }
+th button:hover { color: var(--ink); }
+th[aria-sort] button { color: var(--ink); }
+th[aria-sort="descending"] button::after { content: " ↓"; }
+th[aria-sort="ascending"] button::after { content: " ↑"; }
+td { text-align: right; padding: 8px; border-bottom: 1px solid var(--grid); font-family: var(--font-data); font-variant-numeric: tabular-nums; white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+td:first-child { font-family: var(--font-body); }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: var(--hover); }
+tbody tr[aria-selected="true"] { background: var(--hover); box-shadow: inset 3px 0 0 var(--ink); }
+.sym { font-family: var(--font-data); font-weight: 500; }
+.cn { color: var(--ink-2); margin-left: 6px; font-size: 13px; }
+.note { font-size: 12.5px; color: var(--ink-3); line-height: 1.6; }
+
+/* 详情 */
+.detail { display: grid; gap: 16px; }
+.d-head { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px 24px; }
+.d-title h2 { font-size: 26px; font-weight: 700; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.d-title h2 .sym { font-size: 15px; color: var(--ink-2); }
+.d-title .seg-name { font-size: 13px; color: var(--ink-3); }
+.d-price { text-align: right; }
+.d-price .big { font-family: var(--font-display); font-size: 44px; font-weight: 600; line-height: 1; }
+.d-price .chg { font-size: 15px; margin-left: 8px; }
+.d-price .sub { font-size: 12.5px; color: var(--ink-3); margin-top: 4px; }
+.range { position: relative; height: 6px; border-radius: 3px; background: var(--grid); margin-top: 6px; min-width: 200px; }
+.range i { position: absolute; top: -4px; width: 3px; height: 14px; border-radius: 2px; background: var(--ink); transform: translateX(-50%); }
+
+.notes { display: grid; gap: 8px; }
+.notes li { list-style: none; display: grid; grid-template-columns: 58px 1fr; gap: 10px; align-items: baseline; font-size: 14px; }
+.notes ul { margin: 0; padding: 0; display: grid; gap: 8px; }
+.tag { font-size: 12px; text-align: center; border-radius: 999px; padding: 1px 0; border: 1px solid color-mix(in srgb, var(--c) 45%, transparent);
+  background: color-mix(in srgb, var(--c) 14%, transparent); color: var(--ink); }
+.t-pos { --c: var(--pos); } .t-neg { --c: var(--neg); } .t-neu { --c: var(--neu); }
+
+.grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.card h3 { font-size: 15px; font-weight: 700; margin-bottom: 2px; }
+.card .cap { font-size: 12.5px; color: var(--ink-3); margin-bottom: 8px; }
+.chart { width: 100%; display: block; overflow: visible; }
+svg text { fill: var(--ink-3); font-family: var(--font-data); font-size: 10.5px; }
+svg .lbl { fill: var(--ink-2); }
+svg .gl { stroke: var(--grid); }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--ink-2); margin-top: 6px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+
+.vals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px 16px; }
+.val .k { font-size: 12.5px; color: var(--ink-2); }
+.val .v { font-family: var(--font-display); font-size: 26px; font-weight: 600; line-height: 1.15; }
+.val .p { font-size: 12px; color: var(--ink-3); }
+.cmp { position: relative; height: 4px; background: var(--grid); border-radius: 2px; margin-top: 4px; }
+.cmp b { position: absolute; top: 0; height: 4px; border-radius: 2px; background: var(--ink-2); }
+.cmp s { position: absolute; top: -3px; width: 2px; height: 10px; background: var(--ink-3); }
+
+.est table td, .est table th { padding: 6px 8px; }
+.ratings { display: flex; height: 22px; border-radius: 4px; overflow: hidden; gap: 2px; margin-top: 4px; }
+.ratings span { display: flex; align-items: center; justify-content: center; font-size: 11.5px; color: #fff; font-family: var(--font-data); min-width: 0; }
+.changes { margin: 10px 0 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+.changes li { list-style: none; display: grid; grid-template-columns: 82px minmax(0, 1fr) auto; gap: 8px; color: var(--ink-2); }
+.changes li .firm { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.news { margin: 0; padding: 0; display: grid; gap: 10px; }
+.news li { list-style: none; display: grid; gap: 1px; }
+.news a { text-decoration: none; font-size: 14px; line-height: 1.45; }
+.news a:hover { text-decoration: underline; }
+.news .src { font-size: 12px; color: var(--ink-3); }
+
+footer { font-size: 12px; color: var(--ink-3); line-height: 1.7; }
+.empty { padding: 60px 20px; text-align: center; color: var(--ink-2); }
+
+@media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
+@media (max-width: 560px) {
+  .vals { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .d-price { text-align: left; }
+  .panel { padding: 16px; }
+  .tbl-wrap { margin-inline: -16px; padding-inline: 16px; }
+}
+</style>
+
+<div class="page" id="app"></div>
+
+<script>
+let DATA = /*__DATA__*/null;
+const CFG = /*__CFG__*/null || {};   // stocks_url：个股数据（stocks 分支）；live_url：盘中价格（live 分支）
+const SVGNS = "http://www.w3.org/2000/svg";
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const minus = s => s.replace("-", "−");
+const pct = (x, d = 0, sign = true) => x == null || !isFinite(x) ? "—" : minus((sign && x > 0 ? "+" : "") + (x * 100).toFixed(d) + "%");
+const fx = (x, d = 2) => x == null || !isFinite(x) ? "—" : minus(Number(x).toFixed(d));
+const cls = x => x == null ? "" : x > 0 ? "up" : x < 0 ? "down" : "";
+function money(x) {
+  if (x == null) return "—";
+  if (Math.abs(x) >= 1e12) return (x / 1e12).toFixed(2) + " 万亿";
+  return Math.round(x / 1e8).toLocaleString("en-US") + " 亿";
+}
+function el(tag, attrs = {}, parent) {
+  const n = document.createElementNS(SVGNS, tag);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+  if (parent) parent.appendChild(n);
+  return n;
+}
+function txt(parent, x, y, s, attrs = {}) { const t = el("text", { x, y, ...attrs }, parent); t.textContent = s; return t; }
+function fmtTime(iso, withDate = true) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return d.toLocaleString("zh-CN", { ...(withDate ? { month: "numeric", day: "numeric" } : {}), hour: "2-digit", minute: "2-digit", hour12: false });
+}
+function ago(iso) {
+  const h = (Date.now() - new Date(iso)) / 36e5;
+  if (h < 1) return Math.max(1, Math.round(h * 60)) + " 分钟前";
+  if (h < 48) return Math.round(h) + " 小时前";
+  return Math.round(h / 24) + " 天前";
+}
+
+/* ---------- 衍生字段（价格变化时重新计算估值） ---------- */
+function derive(s) {
+  const p = s.price;
+  const q = (s.quarters || []).filter(r => r.revenue);
+  const tr = s.eps_trend?.["0y"] || {};
+  const k = s._base_price && p ? p / s._base_price : 1;   // 基本面抓取时的价格 → 最新价格
+  const sc = v => v != null && v > 0 ? v * k : null;
+  return {
+    chg: s.prev_close ? p / s.prev_close - 1 : null,
+    mcap: s.market_cap ? s.market_cap * k : null,
+    pe_fwd: sc(s.pe_fwd), pe_ttm: sc(s.pe_ttm), ps: sc(s.ps_ttm), ev: sc(s.ev_ebitda),
+    yoy: q.length ? q[q.length - 1].rev_yoy : null,
+    rev90: tr.current && tr["90daysAgo"] ? tr.current / tr["90daysAgo"] - 1 : null,
+    upside: s.target?.mean && p ? s.target.mean / p - 1 : null,
+    earn: s.next_earnings?.date || null,
+  };
+}
+
+const COLS = [
+  { key: "sym", label: "股票", sort: s => s.symbol },
+  { key: "price", label: "价格", sort: s => s.price, fmt: s => fx(s.price) },
+  { key: "chg", label: "今日", sort: s => s._d.chg, fmt: s => `<span class="${cls(s._d.chg)}">${pct(s._d.chg, 2)}</span>` },
+  { key: "mcap", label: "市值（美元）", sort: s => s._d.mcap, fmt: s => money(s._d.mcap) },
+  { key: "pe_fwd", label: "远期 PE", sort: s => s._d.pe_fwd, fmt: s => fx(s._d.pe_fwd, 1) },
+  { key: "ps", label: "市销率", sort: s => s._d.ps, fmt: s => fx(s._d.ps, 1) },
+  { key: "yoy", label: "营收同比", sort: s => s._d.yoy, fmt: s => `<span class="${cls(s._d.yoy)}">${pct(s._d.yoy)}</span>` },
+  { key: "rev90", label: "EPS 预期 90 天", sort: s => s._d.rev90, fmt: s => `<span class="${cls(s._d.rev90)}">${pct(s._d.rev90, 1)}</span>` },
+  { key: "upside", label: "目标价空间", sort: s => s._d.upside, fmt: s => pct(s._d.upside) },
+  { key: "earn", label: "下次财报", sort: s => s._d.earn, fmt: s => s._d.earn ? s._d.earn.slice(5) : "—" },
+];
+const state = { sort: "mcap", dir: -1, sel: null };
+
+function stocksList() {
+  return DATA.order.map(k => DATA.stocks[k]).filter(Boolean).map(s => (s._d = derive(s), s));
+}
+
+/* ---------- 页面 ---------- */
+function render() {
+  const app = document.getElementById("app");
+  if (!DATA) { app.innerHTML = `<div class="panel empty">${CFG.stocks_url ? "数据加载失败，请稍后刷新。" : "还没有数据。运行 <span class=\"num\">python stocks.py</span> 生成。"}</div>`; return; }
+  const list = stocksList();
+  if (!state.sel || !DATA.stocks[state.sel]) state.sel = (location.hash.slice(1).toUpperCase() in DATA.stocks) ? location.hash.slice(1).toUpperCase() : list[0].symbol;
+  app.innerHTML = `
+  <header>
+    <div>
+      <div class="eyebrow">US Semiconductors · Stocks</div>
+      <h1>半导体个股看盘</h1>
+    </div>
+    <a class="nav" href="./">← 恐慌贪婪指数</a>
+    <div class="meta" style="flex-basis:100%">
+      <span>价格 <span class="num" id="price-time">${fmtTime(DATA.price_time || DATA.generated_at)}</span></span>
+      <span>基本面 <span class="num">${fmtTime(DATA.fundamentals_updated)}</span></span>
+      <span>新闻 <span class="num">${fmtTime(DATA.news_updated)}</span></span>
+    </div>
+  </header>
+
+  <section class="panel">
+    <div class="tbl-wrap"><table>
+      <thead><tr>${COLS.map(c => `<th${state.sort === c.key ? ` aria-sort="${state.dir < 0 ? "descending" : "ascending"}"` : ""}><button type="button" data-k="${c.key}">${c.label}</button></th>`).join("")}</tr></thead>
+      <tbody id="rows"></tbody>
+    </table></div>
+    <p class="note" style="margin-top:10px">点表头排序，点一行看详情。远期 PE、市销率、目标价空间随最新价格换算；营收同比为最近一个财季。EPS 预期 90 天是分析师对本财年 EPS 的一致预期在 90 天内的变化。</p>
+  </section>
+
+  <section class="detail" id="detail"></section>
+
+  <footer>数据来自 Yahoo Finance（价格、财务、分析师预期与评级）${DATA.news_source ? `，新闻来自 ${esc(DATA.news_source)}` : ""}。页面上的"要点"由程序按数据自动整理，只描述数据，不构成投资建议。</footer>`;
+
+  app.querySelector("thead").addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    const k = b.dataset.k;
+    state.dir = state.sort === k ? -state.dir : (k === "sym" || k === "earn" ? 1 : -1);
+    state.sort = k;
+    render();
+  });
+  renderRows(list);
+  renderDetail();
+}
+
+function renderRows(list) {
+  const col = COLS.find(c => c.key === state.sort);
+  const sorted = [...list].sort((a, b) => {
+    const x = col.sort(a), y = col.sort(b);
+    if (x == null) return 1; if (y == null) return -1;
+    return (x > y ? 1 : x < y ? -1 : 0) * state.dir;
+  });
+  const tb = document.getElementById("rows");
+  tb.innerHTML = sorted.map(s => `<tr tabindex="0" data-s="${s.symbol}" aria-selected="${s.symbol === state.sel}">
+    <td><span class="sym">${s.symbol}</span><span class="cn">${esc(s.name)}</span></td>
+    ${COLS.slice(1).map(c => `<td>${c.fmt(s)}</td>`).join("")}</tr>`).join("");
+  tb.onclick = e => { const tr = e.target.closest("tr"); if (tr) select(tr.dataset.s, true); };
+  tb.onkeydown = e => { if (e.key === "Enter") { const tr = e.target.closest("tr"); if (tr) select(tr.dataset.s, true); } };
+}
+
+function select(sym, scroll) {
+  state.sel = sym;
+  try { history.replaceState(null, "", "#" + sym); } catch (_) {}
+  document.querySelectorAll("#rows tr").forEach(tr => tr.setAttribute("aria-selected", tr.dataset.s === sym));
+  renderDetail();
+  if (scroll) document.getElementById("detail").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function renderDetail() {
+  const s = DATA.stocks[state.sel]; if (!s) return;
+  const d = derive(s);
+  const pos52 = s.high_52w && s.low_52w ? (s.price - s.low_52w) / (s.high_52w - s.low_52w) : null;
+  const box = document.getElementById("detail");
+  box.innerHTML = `
+  <div class="panel">
+    <div class="d-head">
+      <div class="d-title">
+        <h2>${esc(s.name)} <span class="sym">${s.symbol}</span></h2>
+        <div class="seg-name">${esc(s.segment)} · 市值 ${money(d.mcap)} 美元${s.beta != null ? ` · Beta ${fx(s.beta)}` : ""}</div>
+      </div>
+      <div class="d-price">
+        <div><span class="big num">${fx(s.price)}</span><span class="chg num ${cls(d.chg)}">${pct(d.chg, 2)}</span></div>
+        ${pos52 != null ? `<div class="sub">52 周区间 <span class="num">${fx(s.low_52w)} – ${fx(s.high_52w)}</span></div>
+        <div class="range" title="在 52 周区间中的位置"><i style="left:${Math.min(100, Math.max(0, pos52 * 100))}%"></i></div>` : ""}
+      </div>
+    </div>
+  </div>
+
+  <div class="panel notes">
+    <h3 style="font-size:15px">要点</h3>
+    <ul>${(s.notes || []).map(n => `<li><span class="tag t-${n.tone}">${esc(n.tag)}</span><span>${esc(n.text)}</span></li>`).join("") || `<li><span></span><span class="muted">暂无数据</span></li>`}</ul>
+  </div>
+
+  <div class="grid2">
+    <div class="panel card"><h3>股价走势</h3><p class="cap">近一年收盘价；虚线为分析师平均目标价</p><svg class="chart" id="c-price" height="200"></svg></div>
+    <div class="panel card"><h3>季度营收</h3><p class="cap">单位：亿美元；浅色为分析师一致预期</p><svg class="chart" id="c-rev" height="200"></svg>
+      <div class="legend"><span><i style="background:var(--ink-2)"></i>实际</span><span><i style="background:var(--est)"></i>预期</span></div></div>
+    <div class="panel card"><h3>季度 EPS 与预期</h3><p class="cap">柱为实际 EPS，短横线为当时的一致预期；最后一根为下一季预期</p><svg class="chart" id="c-eps" height="200"></svg>
+      <div class="legend"><span><i style="background:var(--pos-soft)"></i>高于预期</span><span><i style="background:var(--neg-soft)"></i>低于预期</span><span><i style="background:var(--est)"></i>下一季预期</span></div></div>
+    <div class="panel card"><h3>估值与盈利能力</h3><p class="cap">竖线为 ${DATA.order.length} 家公司的中位数</p><div class="vals" id="vals"></div></div>
+    <div class="panel card est"><h3>EPS 一致预期的变化</h3><p class="cap">分析师预期上调说明基本面在变好，下调则相反</p><div class="tbl-wrap" id="trend"></div></div>
+    <div class="panel card"><h3>分析师</h3><p class="cap" id="an-cap"></p><div id="analyst"></div></div>
+  </div>
+
+  <div class="panel card">
+    <h3>最近新闻</h3><p class="cap">${s.news?.length ? "按时间倒序，点标题打开原文" : "暂无新闻"}</p>
+    <ul class="news">${(s.news || []).map(a => `<li><a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.title)}</a>
+      <span class="src">${esc(a.source)} · ${a.time ? ago(a.time) : ""}</span></li>`).join("")}</ul>
+  </div>`;
+  drawPrice(s); drawRevenue(s); drawEps(s); drawValuation(s, d); drawTrend(s); drawAnalyst(s, d);
+}
+
+/* ---------- 图表 ---------- */
+function frame(id, H) {
+  const svg = document.getElementById(id);
+  const W = svg.clientWidth || 480;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.innerHTML = "";
+  return [svg, W];
+}
+function nice(lo, hi, n = 4) {
+  const span = hi - lo || Math.abs(hi) || 1, raw = span / n, mag = 10 ** Math.floor(Math.log10(raw));
+  const step = [1, 2, 2.5, 5, 10].map(k => k * mag).find(k => k >= raw);
+  const ticks = [], top = Math.ceil(hi / step - 1e-9) * step;
+  for (let v = Math.floor(lo / step + 1e-9) * step; v <= top + step * 0.01; v += step) ticks.push(+v.toFixed(8));
+  return ticks;
+}
+
+function drawPrice(s) {
+  const h = s.history; if (!h?.close?.length) return;
+  const [svg, W] = frame("c-price", 200), M = { l: 44, r: 8, t: 8, b: 20 };
+  const vals = [...h.close]; const tgt = s.target?.mean;
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  const showT = tgt && tgt < hi * 1.6 && tgt > lo * 0.6;
+  if (showT) { lo = Math.min(lo, tgt); hi = Math.max(hi, tgt); }
+  const ticks = nice(lo, hi); const y0 = ticks[0], y1 = ticks.at(-1);
+  const x = i => M.l + (W - M.l - M.r) * i / (vals.length - 1);
+  const y = v => M.t + (200 - M.t - M.b) * (1 - (v - y0) / (y1 - y0));
+  for (const v of ticks) { el("line", { class: "gl", x1: M.l, x2: W - M.r, y1: y(v), y2: y(v) }, svg); txt(svg, M.l - 6, y(v) + 3.5, v >= 1000 ? (v / 1000) + "k" : v, { "text-anchor": "end" }); }
+  let last = ""; h.dates.forEach((dt, i) => { const k = dt.slice(0, 7); if (k !== last && i > 0 && (+dt.slice(5, 7)) % 3 === 1) txt(svg, x(i), 196, dt.slice(2, 7).replace("-", "/"), { "text-anchor": "middle" }); last = k; });
+  if (showT) { el("line", { x1: M.l, x2: W - M.r, y1: y(tgt), y2: y(tgt), stroke: "var(--pos)", "stroke-dasharray": "4 3" }, svg); txt(svg, W - M.r, y(tgt) - 4, `目标 ${fx(tgt)}`, { "text-anchor": "end", class: "lbl" }); }
+  const up = vals.at(-1) >= vals[0];
+  const d = vals.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
+  el("path", { d: d + `L${x(vals.length - 1)},${y(y0)}L${x(0)},${y(y0)}Z`, fill: `color-mix(in srgb, var(${up ? "--pos" : "--neg"}) 10%, transparent)` }, svg);
+  el("path", { d, fill: "none", stroke: `var(${up ? "--pos" : "--neg"})`, "stroke-width": 1.6, "stroke-linejoin": "round" }, svg);
+  el("circle", { cx: x(vals.length - 1), cy: y(vals.at(-1)), r: 4, fill: `var(${up ? "--pos" : "--neg"})`, stroke: "var(--surface)", "stroke-width": 2 }, svg);
+}
+
+function bars(id, items, fmtVal) {
+  // items: [{label, value, est?, color, mark?}]
+  const [svg, W] = frame(id, 200), M = { l: 44, r: 8, t: 16, b: 34 };
+  const allv = items.flatMap(i => [i.value, i.mark]).filter(v => v != null);
+  if (!allv.length) { txt(svg, W / 2, 100, "暂无数据", { "text-anchor": "middle" }); return; }
+  const lo = Math.min(0, ...allv), hi = Math.max(0, ...allv), pad = (hi - lo) * 0.12;   // 留出柱顶数字的位置
+  const ticks = nice(lo < 0 ? lo - pad : 0, hi > 0 ? hi + pad : 0); const y0 = ticks[0], y1 = ticks.at(-1);
+  const y = v => M.t + (200 - M.t - M.b) * (1 - (v - y0) / (y1 - y0));
+  for (const v of ticks) { el("line", { class: "gl", x1: M.l, x2: W - M.r, y1: y(v), y2: y(v) }, svg); txt(svg, M.l - 6, y(v) + 3.5, fmtVal(v, true), { "text-anchor": "end" }); }
+  const n = items.length, slot = (W - M.l - M.r) / n, bw = Math.min(34, slot * 0.6);
+  items.forEach((it, i) => {
+    const cx = M.l + slot * (i + 0.5);
+    if (it.value != null) {
+      const top = y(Math.max(0, it.value)), bot = y(Math.min(0, it.value));
+      el("rect", { x: cx - bw / 2, y: top, width: bw, height: Math.max(1, bot - top), rx: 2, fill: it.color }, svg);
+      txt(svg, cx, it.value >= 0 ? top - 4 : bot + 11, fmtVal(it.value), { "text-anchor": "middle", class: "lbl" });
+    }
+    if (it.mark != null) el("line", { x1: cx - bw / 2 - 4, x2: cx + bw / 2 + 4, y1: y(it.mark), y2: y(it.mark), stroke: "var(--ink)", "stroke-width": 2 }, svg);
+    txt(svg, cx, 200 - M.b + 14, it.label, { "text-anchor": "middle" });
+    if (it.sub) txt(svg, cx, 200 - M.b + 27, it.sub, { "text-anchor": "middle", class: it.subCls || "" });
+  });
+}
+
+function drawRevenue(s) {
+  const q = (s.quarters || []).filter(r => r.revenue).slice(-6);
+  const est = s.rev_est || {};
+  const items = q.map(r => ({ label: r.period.slice(2).replace("-", "/"), value: r.revenue / 1e8, color: "var(--ink-2)",
+    sub: r.rev_yoy != null ? "同比" + pct(r.rev_yoy) : "" }));
+  for (const [k, lab] of [["0q", "本季"], ["+1q", "下季"]]) if (est[k]?.avg) items.push({ label: lab + "预期", value: est[k].avg / 1e8, color: "var(--est)", sub: est[k].growth != null ? "同比" + pct(est[k].growth) : "" });
+  bars("c-rev", items, (v, axis) => axis ? (v >= 1000 ? (v / 1000).toFixed(v % 1000 ? 1 : 0) + "k" : Math.round(v)) : Math.round(v).toLocaleString("en-US"));
+}
+
+function drawEps(s) {
+  const items = (s.surprises || []).map(r => ({ label: r.quarter.slice(2).replace("-", "/"), value: r.actual, mark: r.estimate,
+    color: r.surprise == null ? "var(--ink-2)" : r.surprise >= 0 ? "var(--pos-soft)" : "var(--neg-soft)",
+    sub: r.surprise != null ? pct(r.surprise, 1) : "", subCls: r.surprise >= 0 ? "" : "" }));
+  const nq = s.eps_est?.["0q"];
+  if (nq?.avg != null) items.push({ label: "下一季", value: nq.avg, color: "var(--est)", sub: "预期" });
+  bars("c-eps", items, v => fx(v, 2));
+}
+
+function drawValuation(s, d) {
+  const P = DATA.peers || {};
+  const rows = [
+    ["远期 PE", d.pe_fwd, P.pe_fwd, v => fx(v, 1)], ["TTM PE", d.pe_ttm, P.pe_ttm, v => fx(v, 1)],
+    ["市销率", d.ps, P.ps_ttm, v => fx(v, 1)], ["EV/EBITDA", d.ev, P.ev_ebitda, v => fx(v, 1)],
+    ["毛利率", s.gross_margin, P.gross_margin, v => pct(v, 0, false)], ["营业利润率", s.op_margin, P.op_margin, v => pct(v, 0, false)],
+  ];
+  document.getElementById("vals").innerHTML = rows.map(([k, v, med, f]) => {
+    const max = Math.max(v || 0, med || 0) * 1.25 || 1;
+    return `<div class="val"><div class="k">${k}</div><div class="v num">${v != null && v > 0 ? f(v) : "—"}</div>
+      <div class="cmp">${v > 0 ? `<b style="width:${Math.min(100, v / max * 100)}%"></b>` : ""}${med ? `<s style="left:${med / max * 100}%"></s>` : ""}</div>
+      <div class="p">中位数 ${med ? f(med) : "—"}</div></div>`;
+  }).join("") + `<p class="note" style="grid-column:1/-1">PEG ${fx(s.peg)}（市盈率 ÷ 盈利增速，越低说明相对增长越便宜）；TTM 为过去 12 个月。</p>`;
+}
+
+function drawTrend(s) {
+  const t = s.eps_trend || {}, r = s.eps_rev || {}, e = s.eps_est || {};
+  const lab = { "0q": "本季", "+1q": "下季", "0y": "本财年", "+1y": "下财年" };
+  const rows = Object.keys(lab).filter(k => t[k]?.current != null);
+  if (!rows.length) { document.getElementById("trend").innerHTML = `<p class="note">暂无数据</p>`; return; }
+  document.getElementById("trend").innerHTML = `<table><thead><tr><th>周期</th><th>当前</th><th>30 天前</th><th>90 天前</th><th>90 天变化</th><th>30 天上调/下调</th><th>预计增长</th></tr></thead><tbody>${
+    rows.map(k => { const c = t[k], ch = c["90daysAgo"] ? c.current / c["90daysAgo"] - 1 : null;
+      return `<tr><td>${lab[k]}</td><td>${fx(c.current)}</td><td>${fx(c["30daysAgo"])}</td><td>${fx(c["90daysAgo"])}</td>
+        <td class="${cls(ch)}">${pct(ch, 1)}</td><td>${r[k] ? `<span class="up">${r[k].upLast30days ?? 0}</span> / <span class="down">${r[k].downLast30days ?? 0}</span>` : "—"}</td>
+        <td>${pct(e[k]?.growth)}</td></tr>`; }).join("")}</tbody></table>`;
+}
+
+function drawAnalyst(s, d) {
+  const tg = s.target || {}, r = s.ratings;
+  document.getElementById("an-cap").textContent = `${tg.n ?? "—"} 位分析师给出目标价；评级为最近一个月的分布`;
+  let html = "";
+  if (r) {
+    const parts = [["strongBuy", "强烈买入", "var(--pos)"], ["buy", "买入", "var(--pos-soft)"], ["hold", "持有", "var(--neu)"], ["sell", "卖出", "var(--neg-soft)"], ["strongSell", "强烈卖出", "var(--neg)"]];
+    const tot = parts.reduce((a, [k]) => a + (r[k] || 0), 0) || 1;
+    html += `<div class="ratings" role="img" aria-label="评级分布">${parts.filter(([k]) => r[k]).map(([k, , c]) => `<span style="flex:${r[k]};background:${c}" title="${r[k]}">${r[k] / tot > 0.07 ? r[k] : ""}</span>`).join("")}</div>
+      <div class="legend">${parts.map(([k, l, c]) => `<span><i style="background:${c}"></i>${l} ${r[k] || 0}</span>`).join("")}</div>`;
+  }
+  if (tg.mean && tg.low && tg.high) {
+    const lo = Math.min(tg.low, s.price), hi = Math.max(tg.high, s.price), X = v => (v - lo) / (hi - lo) * 100;
+    html += `<div style="margin-top:14px;font-size:13px;color:var(--ink-2)">目标价：最低 <span class="num">${fx(tg.low)}</span>，平均 <span class="num">${fx(tg.mean)}</span>（较现价 <span class="num">${pct(d.upside)}</span>），最高 <span class="num">${fx(tg.high)}</span></div>
+      <div style="position:relative;height:26px;margin-top:6px">
+        <div style="position:absolute;top:11px;left:${X(tg.low)}%;width:${X(tg.high) - X(tg.low)}%;height:4px;border-radius:2px;background:var(--est)"></div>
+        <div title="平均目标价" style="position:absolute;top:5px;left:${X(tg.mean)}%;width:3px;height:16px;background:var(--pos);transform:translateX(-50%)"></div>
+        <div title="现价" style="position:absolute;top:3px;left:${X(s.price)}%;width:10px;height:10px;border-radius:50%;background:var(--ink);transform:translateX(-50%);box-shadow:0 0 0 2px var(--surface)"></div>
+      </div>
+      <div class="legend"><span><i style="background:var(--ink);border-radius:50%"></i>现价</span><span><i style="background:var(--pos)"></i>平均目标价</span><span><i style="background:var(--est)"></i>最低到最高</span></div>`;
+  }
+  const ch = s.rating_changes || [];
+  if (ch.length) {
+    const act = { up: "上调评级", down: "下调评级", init: "首次覆盖", main: "维持", reit: "重申" };
+    html += `<p class="note" style="margin-top:12px">最近的评级与目标价调整${s.rating_changes_30d ? `（近 30 天共 ${s.rating_changes_30d.n} 次）` : ""}</p><ul class="changes">${ch.map(c => {
+      const pt = c.pt != null ? (c.pt_prev && c.pt_prev !== c.pt ? `${fx(c.pt, 0)} ← ${fx(c.pt_prev, 0)}` : fx(c.pt, 0)) : "";
+      const ptc = c.pt != null && c.pt_prev ? (c.pt > c.pt_prev ? "up" : c.pt < c.pt_prev ? "down" : "") : "";
+      return `<li><span class="num">${c.date.slice(5)}</span><span class="firm">${esc(c.firm)} · ${act[c.action] || esc(c.action)} ${esc(c.to || "")}</span><span class="num ${ptc}">${pt}</span></li>`; }).join("")}</ul>`;
+  }
+  document.getElementById("analyst").innerHTML = html || `<p class="note">暂无数据</p>`;
+}
+
+/* ---------- 盘中价格：读 live 分支上的 live.json（与恐慌贪婪指数页同一份），每 3 分钟一次 ---------- */
+async function pollQuotes() {
+  const url = CFG.live_url || DATA?.live_url;
+  if (!DATA || !url || document.hidden) return;
+  try {
+    const r = await fetch(url, { cache: "no-store", headers: { Accept: "application/vnd.github.raw+json" } });
+    if (!r.ok) return;
+    const live = await r.json();
+    const q = live.quotes; if (!q) return;
+    let changed = false;
+    for (const [sym, [p, prev]] of Object.entries(q)) {
+      const s = DATA.stocks[sym]; if (!s || p == null) continue;
+      if (s.price !== p) { s.price = p; s.prev_close = prev ?? s.prev_close; changed = true;
+        const h = s.history; if (h?.dates?.length) { if (h.dates.at(-1) === live.as_of) h.close[h.close.length - 1] = p; else if (live.as_of > h.dates.at(-1)) { h.dates.push(live.as_of); h.close.push(p); } } }
+    }
+    if (changed) { DATA.price_time = live.generated_at; const y = scrollY; renderRows(stocksList()); renderDetail(); document.getElementById("price-time").textContent = fmtTime(live.generated_at); scrollTo(0, y); }
+  } catch (_) { /* 网络问题时保持当前内容 */ }
+}
+
+/* 网站上的页面不内嵌数据，打开时从 stocks 分支读最新的一份；本地生成的页面直接内嵌 */
+async function boot() {
+  if (!DATA && CFG.stocks_url) {
+    document.getElementById("app").innerHTML = `<div class="panel empty">加载中 …</div>`;
+    try { const r = await fetch(CFG.stocks_url, { cache: "no-store" }); if (r.ok) DATA = await r.json(); } catch (_) {}
+  }
+  // 估值随价格换算，需要记住基本面对应的价格
+  if (DATA) for (const s of Object.values(DATA.stocks)) s._base_price = s.fundamentals_price ?? s.price;
+  render();
+  if (!DATA) return;
+  let t; new ResizeObserver(() => { clearTimeout(t); t = setTimeout(renderDetail, 120); }).observe(document.getElementById("app"));
+  window.addEventListener("hashchange", () => { const k = location.hash.slice(1).toUpperCase(); if (DATA.stocks[k] && k !== state.sel) select(k, false); });
+  if (location.protocol.startsWith("http")) {
+    pollQuotes(); setInterval(pollQuotes, 180000);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) pollQuotes(); });
+  }
+}
+boot();
+</script>

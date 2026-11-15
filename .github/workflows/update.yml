@@ -15,7 +15,7 @@ on:
         default: true
   push:
     branches: [main]
-    paths: [semi_fgi.py, ci.py, template.html, requirements.txt, .github/workflows/update.yml]
+    paths: [semi_fgi.py, ci.py, stocks.py, template.html, template_stocks.html, requirements.txt, .github/workflows/update.yml]
 
 permissions:
   contents: write
@@ -24,6 +24,8 @@ permissions:
 
 env:
   LIVE_URL: https://api.github.com/repos/${{ github.repository }}/contents/live.json?ref=live
+  # 个股数据一小时最多变一次，用 raw 地址读（有约 5 分钟的缓存，但不占 GitHub API 每小时 60 次的额度）
+  STOCKS_URL: https://raw.githubusercontent.com/${{ github.repository }}/stocks/stocks.json
 
 jobs:
   update:
@@ -34,6 +36,7 @@ jobs:
       group: update
       cancel-in-progress: true
     outputs:
+      live: ${{ steps.run.outputs.live }}
       pages: ${{ steps.run.outputs.pages }}
     steps:
       - uses: actions/checkout@v5
@@ -102,6 +105,56 @@ jobs:
         uses: actions/upload-pages-artifact@v4
         with:
           path: site
+
+  # 个股看盘：基本面每天第一次运行时刷新，新闻每小时刷新，结果推到 stocks 分支，网页直接读取。
+  # 抓取要 1–3 分钟，所以单独成一个任务，不被每 3 分钟一次的指数更新取消，也不拖慢它
+  stocks:
+    needs: update
+    if: needs.update.outputs.live == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: stocks
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v5
+
+      - id: py
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - id: venv
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ steps.py.outputs.python-version }}-${{ hashFiles('requirements.txt') }}
+
+      - if: steps.venv.outputs.cache-hit != 'true'
+        run: python -m venv .venv && .venv/bin/pip install -r requirements.txt
+
+      - name: 读取上一次的个股数据
+        run: |
+          mkdir -p cache_stocks
+          curl -sfL -H "Authorization: Bearer ${{ github.token }}" -H "Accept: application/vnd.github.raw+json" \
+            "https://api.github.com/repos/${{ github.repository }}/contents/stocks.json?ref=stocks" \
+            -o cache_stocks/stocks.json || rm -f cache_stocks/stocks.json
+
+      - id: run
+        env:
+          FORCE: ${{ github.event_name == 'push' }}
+        run: .venv/bin/python stocks.py --ci
+
+      - name: 推送个股数据到 stocks 分支
+        if: steps.run.outputs.changed == 'true'
+        working-directory: stocks_out
+        run: |
+          git init -q -b stocks
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add stocks.json
+          git commit -q -m "stocks $(date -u +%FT%TZ)"
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" stocks
 
   # GitHub Pages 提供网页本身和一份完整数据作备份；发布后要过几分钟才生效，所以不靠它传最新数据
   deploy:

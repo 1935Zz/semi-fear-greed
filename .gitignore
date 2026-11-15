@@ -5,3 +5,5 @@ cache/
 site/
 .DS_Store
 live/
+cache_stocks/
+stocks_out/

@@ -1,3 +1,7 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>半导体恐慌贪婪指数</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -62,6 +66,8 @@ p { margin: 0; }
 
 /* header */
 header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: 12px 24px; }
+.nav { font-size: 13.5px; color: var(--ink-2); text-decoration: none; border: 1px solid var(--line); border-radius: 8px; padding: 2px 12px; background: var(--surface); white-space: nowrap; }
+.nav:hover { color: var(--ink); border-color: var(--ink-3); }
 header h1 { font-size: clamp(26px, 4vw, 34px); font-weight: 700; letter-spacing: .01em; margin-top: 4px; }
 .meta { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--ink-2); font-size: 13px; }
 .meta b { color: var(--ink); font-weight: 500; }
@@ -290,6 +296,7 @@ function render() {
       <span>费城半导体指数 SOX <b class="num">${d.sox_last.toLocaleString("en-US", { maximumFractionDigits: 2 })}</b>
         <b class="num ${soxChg >= 0 ? "up" : "down"}">${sign(soxChg.toFixed(2))}%</b></span>
       <span id="market"></span>
+      <a class="nav" href="stocks.html">个股看盘 →</a>
     </div>
   </header>
 
